@@ -8,9 +8,12 @@ import {
   exportDexWalkForwardDataset,
   fillNoTradeIntervals,
   planBlockRanges,
+  readUniswapV3PoolSwaps,
+  UNISWAP_V3_SWAP_TOPIC,
   validatePoolRegistry,
   type DexPoolConfig,
   type DexPoolDatasetManifest,
+  type EvmRpcFetch,
   type HistoricalKline,
   type NormalizedPoolSwap,
 } from '../src/index.js';
@@ -49,6 +52,86 @@ describe('dex-pool-datasets', () => {
       { fromBlock: 17n, toBlock: 23n },
       { fromBlock: 24n, toBlock: 25n },
     ]);
+  });
+
+  it('reads and decodes Uniswap v3 Swap logs through eth_getLogs', async () => {
+    const pool = poolConfig();
+    const sqrtPriceX96 = sqrtPriceX96ForAdjustedPrice({
+      priceToken1PerToken0: 3200,
+      token0Decimals: pool.token0.decimals,
+      token1Decimals: pool.token1.decimals,
+    });
+    const calls: string[] = [];
+    const fetchFn: EvmRpcFetch = async (_url, init) => {
+      const request = JSON.parse(init.body) as {
+        id: number;
+        method: string;
+        params: unknown[];
+      };
+      calls.push(request.method);
+      if (request.method === 'eth_getLogs') {
+        expect(request.params[0]).toMatchObject({
+          address: pool.poolAddress,
+          fromBlock: '0xa',
+          toBlock: '0xa',
+          topics: [UNISWAP_V3_SWAP_TOPIC],
+        });
+        return jsonRpcResponse(request.id, [{
+          address: pool.poolAddress,
+          topics: [
+            UNISWAP_V3_SWAP_TOPIC,
+            topicAddress('0x00000000000000000000000000000000000000aa'),
+            topicAddress('0x00000000000000000000000000000000000000bb'),
+          ],
+          data: encodeWords([
+            encodeInt256(-1_500_000_000_000_000_000n),
+            encodeInt256(4_800_000_000n),
+            encodeUint256(sqrtPriceX96),
+            encodeUint256(123456789n),
+            encodeInt256(123n),
+          ]),
+          blockNumber: '0xa',
+          blockHash: '0x00000000000000000000000000000000000000000000000000000000000000ab',
+          transactionHash: '0x00000000000000000000000000000000000000000000000000000000000000cd',
+          transactionIndex: '0x2',
+          logIndex: '0x3',
+        }]);
+      }
+      if (request.method === 'eth_getBlockByNumber') {
+        expect(request.params).toEqual(['0xa', false]);
+        return jsonRpcResponse(request.id, {
+          number: '0xa',
+          hash: '0x00000000000000000000000000000000000000000000000000000000000000ab',
+          timestamp: '0x6553f100',
+        });
+      }
+      throw new Error(`unexpected method ${request.method}`);
+    };
+
+    const swaps = await readUniswapV3PoolSwaps({
+      pool,
+      rpcUrl: 'https://rpc.test',
+      fromBlock: 10n,
+      toBlock: 10n,
+      fetchFn,
+    });
+
+    expect(calls).toEqual(['eth_getLogs', 'eth_getBlockByNumber']);
+    expect(swaps).toHaveLength(1);
+    expect(swaps[0]).toMatchObject({
+      chain: 'base',
+      dex: 'uniswap_v3',
+      poolAddress: pool.poolAddress,
+      blockNumber: 10n,
+      transactionIndex: 2,
+      logIndex: 3,
+      blockTimestamp: 1_700_000_000,
+      amount0: -1.5,
+      amount1: 4800,
+      liquidityAfter: '123456789',
+      tickAfter: 123,
+    });
+    expect(swaps[0]!.priceToken1PerToken0).toBeCloseTo(3200, 3);
   });
 
   it('builds DEX pool candles, fill-forwards no-trade intervals, and aggregates higher timeframes', () => {
@@ -405,4 +488,42 @@ function swap(input: {
     priceToken1PerToken0: input.price,
     priceToken0PerToken1: 1 / input.price,
   };
+}
+
+function jsonRpcResponse(id: number, result: unknown): ReturnType<EvmRpcFetch> {
+  return Promise.resolve({
+    ok: true,
+    status: 200,
+    text: () => Promise.resolve(JSON.stringify({
+      jsonrpc: '2.0',
+      id,
+      result,
+    })),
+  });
+}
+
+function sqrtPriceX96ForAdjustedPrice(input: {
+  priceToken1PerToken0: number;
+  token0Decimals: number;
+  token1Decimals: number;
+}): bigint {
+  const rawPrice = input.priceToken1PerToken0 / 10 ** (input.token0Decimals - input.token1Decimals);
+  return BigInt(Math.floor(Math.sqrt(rawPrice) * 2 ** 96));
+}
+
+function encodeWords(words: string[]): `0x${string}` {
+  return `0x${words.join('')}`;
+}
+
+function encodeInt256(value: bigint): string {
+  const encoded = value < 0n ? (1n << 256n) + value : value;
+  return encodeUint256(encoded);
+}
+
+function encodeUint256(value: bigint): string {
+  return value.toString(16).padStart(64, '0');
+}
+
+function topicAddress(address: `0x${string}`): `0x${string}` {
+  return `0x${address.slice(2).padStart(64, '0')}`;
 }

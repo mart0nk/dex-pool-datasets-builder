@@ -6,6 +6,9 @@ Current scope:
 
 - pool registry validation
 - EVM block range planning
+- EVM JSON-RPC `eth_getLogs` reads
+- block timestamp caching via `eth_getBlockByNumber`
+- Uniswap v3 `Swap` log decoding
 - normalized swap to DEX pool candle conversion
 - no-trade fill-forward replay policy
 - timeframe aggregation
@@ -13,8 +16,6 @@ Current scope:
 
 Out of scope for this package slice:
 
-- live RPC log ingestion
-- ABI decoding
 - pool identity verification
 - checkpointed backfills
 - HTTP service orchestration
