@@ -62,10 +62,11 @@ export function createEvmJsonRpcClient(input: {
         params,
       }),
     });
-    const text = await response.text();
     if (!response.ok) {
+      const text = await response.text().catch(() => '<body_unavailable>');
       throw new Error(`EVM_RPC_HTTP_ERROR:${response.status}:${text}`);
     }
+    const text = await response.text();
     const json = JSON.parse(text) as {
       id?: number;
       result?: T;
@@ -110,11 +111,11 @@ export function hexToBigInt(value: HexString): bigint {
 }
 
 export function hexToNumber(value: HexString): number {
-  const parsed = Number(hexToBigInt(value));
-  if (!Number.isSafeInteger(parsed)) {
+  const parsed = hexToBigInt(value);
+  if (parsed > BigInt(Number.MAX_SAFE_INTEGER)) {
     throw new Error(`EVM_HEX_UNSAFE_NUMBER:${value}`);
   }
-  return parsed;
+  return Number(parsed);
 }
 
 const defaultFetch: EvmRpcFetch = async (url, init) => {

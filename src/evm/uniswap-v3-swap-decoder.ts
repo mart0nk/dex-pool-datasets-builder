@@ -8,7 +8,8 @@ export const UNISWAP_V3_SWAP_TOPIC =
 const WORD_HEX_LENGTH = 64;
 const TWO_256 = 1n << 256n;
 const TWO_255 = 1n << 255n;
-const Q96 = 2 ** 96;
+const Q192 = 1n << 192n;
+const PRICE_SCALE = 10n ** 18n;
 
 export function decodeUniswapV3SwapLog(input: {
   pool: DexPoolConfig;
@@ -64,9 +65,12 @@ export function sqrtPriceX96ToAdjustedPrice(input: {
   token0Decimals: number;
   token1Decimals: number;
 }): number {
-  const sqrtRatio = Number(input.sqrtPriceX96) / Q96;
-  const rawPrice = sqrtRatio * sqrtRatio;
-  return rawPrice * 10 ** (input.token0Decimals - input.token1Decimals);
+  const numerator = input.sqrtPriceX96 * input.sqrtPriceX96;
+  const decimalDelta = input.token0Decimals - input.token1Decimals;
+  const scaled = decimalDelta >= 0
+    ? (numerator * PRICE_SCALE * pow10(decimalDelta)) / Q192
+    : (numerator * PRICE_SCALE) / (Q192 * pow10(-decimalDelta));
+  return Number(scaled) / Number(PRICE_SCALE);
 }
 
 export function formatUnitsToNumber(value: bigint, decimals: number): number {
@@ -75,6 +79,13 @@ export function formatUnitsToNumber(value: bigint, decimals: number): number {
 
 function decodeUnsignedWord(data: HexString, wordIndex: number): bigint {
   return BigInt(`0x${readWord(data, wordIndex)}`);
+}
+
+function pow10(exponent: number): bigint {
+  if (!Number.isInteger(exponent) || exponent < 0) {
+    throw new Error(`INVALID_DECIMAL_EXPONENT:${exponent}`);
+  }
+  return 10n ** BigInt(exponent);
 }
 
 function decodeSignedWord(data: HexString, wordIndex: number): bigint {

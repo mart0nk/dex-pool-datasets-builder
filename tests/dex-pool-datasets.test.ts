@@ -4,11 +4,15 @@ import { tmpdir } from 'node:os';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   aggregateDexPoolCandles,
+  BlockTimestampCache,
   buildCandlesFromSwaps,
+  createEvmJsonRpcClient,
   exportDexWalkForwardDataset,
   fillNoTradeIntervals,
+  hexToNumber,
   planBlockRanges,
   readUniswapV3PoolSwaps,
+  sqrtPriceX96ToAdjustedPrice,
   UNISWAP_V3_SWAP_TOPIC,
   validatePoolRegistry,
   type DexPoolConfig,
@@ -52,6 +56,63 @@ describe('dex-pool-datasets', () => {
       { fromBlock: 17n, toBlock: 23n },
       { fromBlock: 24n, toBlock: 25n },
     ]);
+  });
+
+  it('rejects EVM hex numbers outside the safe integer range before Number conversion', () => {
+    expect(() => hexToNumber('0x20000000000001')).toThrow('EVM_HEX_UNSAFE_NUMBER:0x20000000000001');
+  });
+
+  it('surfaces HTTP status even when reading an error body fails', async () => {
+    const client = createEvmJsonRpcClient({
+      rpcUrl: 'https://rpc.test',
+      fetchFn: async () => ({
+        ok: false,
+        status: 503,
+        text: async () => {
+          throw new Error('stream failed');
+        },
+      }),
+    });
+
+    await expect(client.getBlockByNumber(1n)).rejects.toThrow('EVM_RPC_HTTP_ERROR:503:<body_unavailable>');
+  });
+
+  it('evicts old block timestamps when cache reaches its max entries', async () => {
+    let calls = 0;
+    const cache = new BlockTimestampCache({
+      async getBlockByNumber(blockNumber) {
+        calls += 1;
+        return {
+          number: `0x${blockNumber.toString(16)}`,
+          hash: '0x1',
+          timestamp: `0x${(1_700_000_000n + blockNumber).toString(16)}`,
+        };
+      },
+      async getLogs() {
+        return [];
+      },
+    }, { maxEntries: 2 });
+
+    await cache.getTimestamp(1n);
+    await cache.getTimestamp(2n);
+    await cache.getTimestamp(3n);
+    expect(cache.size).toBe(2);
+    await cache.getTimestamp(1n);
+    expect(calls).toBe(4);
+  });
+
+  it('computes Uniswap V3 sqrtPriceX96 adjusted price using BigInt-scaled arithmetic', () => {
+    const sqrtPriceX96 = sqrtPriceX96ForAdjustedPrice({
+      priceToken1PerToken0: 3200,
+      token0Decimals: 18,
+      token1Decimals: 6,
+    });
+
+    expect(sqrtPriceX96ToAdjustedPrice({
+      sqrtPriceX96,
+      token0Decimals: 18,
+      token1Decimals: 6,
+    })).toBeCloseTo(3200, 3);
   });
 
   it('reads and decodes Uniswap v3 Swap logs through eth_getLogs', async () => {
