@@ -7,16 +7,19 @@ import {
   BlockTimestampCache,
   buildCandlesFromSwaps,
   createEvmJsonRpcClient,
+  decodeUniswapV3SwapLog,
   exportDexWalkForwardDataset,
   fillNoTradeIntervals,
   hexToNumber,
   planBlockRanges,
   readUniswapV3PoolSwaps,
+  readUniswapV3PoolSwapsWithQuality,
   sqrtPriceX96ToAdjustedPrice,
   UNISWAP_V3_SWAP_TOPIC,
   validatePoolRegistry,
   type DexPoolConfig,
   type DexPoolDatasetManifest,
+  type EvmBlock,
   type EvmRpcFetch,
   type HistoricalKline,
   type NormalizedPoolSwap,
@@ -101,6 +104,41 @@ describe('dex-pool-datasets', () => {
     expect(calls).toBe(4);
   });
 
+  it('rejects malformed block hashes in hash-aware timestamp lookups', async () => {
+    const cache = new BlockTimestampCache({
+      async getBlockByNumber(blockNumber) {
+        return {
+          number: `0x${blockNumber.toString(16)}`,
+          hash: '0x',
+          timestamp: `0x${(1_700_000_000n + blockNumber).toString(16)}`,
+        };
+      },
+      async getLogs() {
+        return [];
+      },
+    });
+
+    await expect(cache.getBlockTimestamp(10n)).rejects.toThrow('EVM_BLOCK_HASH_INVALID:10:0x');
+    await expect(cache.getTimestamp(10n)).resolves.toBe(1_700_000_010);
+  });
+
+  it('surfaces structured timestamp errors from timestamp-only lookups', async () => {
+    const cache = new BlockTimestampCache({
+      async getBlockByNumber(blockNumber) {
+        return {
+          number: `0x${blockNumber.toString(16)}`,
+          hash: '0x',
+          timestamp: '',
+        } as unknown as EvmBlock;
+      },
+      async getLogs() {
+        return [];
+      },
+    });
+
+    await expect(cache.getTimestamp(10n)).rejects.toThrow('EVM_BLOCK_TIMESTAMP_MISSING:10');
+  });
+
   it('computes Uniswap V3 sqrtPriceX96 adjusted price using BigInt-scaled arithmetic', () => {
     const sqrtPriceX96 = sqrtPriceX96ForAdjustedPrice({
       priceToken1PerToken0: 3200,
@@ -113,6 +151,36 @@ describe('dex-pool-datasets', () => {
       token0Decimals: 18,
       token1Decimals: 6,
     })).toBeCloseTo(3200, 3);
+  });
+
+  it('surfaces precise Uniswap v3 Swap structural validation errors', () => {
+    const pool = poolConfig();
+    const baseLog = {
+      address: pool.poolAddress,
+      topics: [
+        UNISWAP_V3_SWAP_TOPIC,
+        topicAddress('0x00000000000000000000000000000000000000aa'),
+        topicAddress('0x00000000000000000000000000000000000000bb'),
+      ],
+      data: '0x' as const,
+      blockNumber: '0xa' as const,
+      blockHash: '0x00000000000000000000000000000000000000000000000000000000000000ab' as const,
+      transactionHash: '0x00000000000000000000000000000000000000000000000000000000000000cd' as const,
+      transactionIndex: '0x2' as const,
+      logIndex: '0x3' as const,
+    };
+
+    expect(() => decodeUniswapV3SwapLog({
+      pool,
+      log: baseLog,
+      blockTimestamp: 1_700_000_000,
+    })).toThrow('UNISWAP_V3_SWAP_DATA_INVALID_HEX');
+
+    expect(() => decodeUniswapV3SwapLog({
+      pool,
+      log: { ...baseLog, topics: [] },
+      blockTimestamp: 1_700_000_000,
+    })).toThrow('UNISWAP_V3_SWAP_TOPIC_COUNT_INVALID');
   });
 
   it('reads and decodes Uniswap v3 Swap logs through eth_getLogs', async () => {
@@ -193,6 +261,299 @@ describe('dex-pool-datasets', () => {
       tickAfter: 123,
     });
     expect(swaps[0]!.priceToken1PerToken0).toBeCloseTo(3200, 3);
+    expect(swaps[0]).toMatchObject({
+      amount0Raw: '-1500000000000000000',
+      amount1Raw: '4800000000',
+      sqrtPriceX96Raw: sqrtPriceX96.toString(),
+    });
+  });
+
+  it('rejects swap logs when block timestamp lookup returns a different block hash', async () => {
+    const pool = poolConfig();
+    const sqrtPriceX96 = sqrtPriceX96ForAdjustedPrice({
+      priceToken1PerToken0: 3200,
+      token0Decimals: pool.token0.decimals,
+      token1Decimals: pool.token1.decimals,
+    });
+    const fetchFn: EvmRpcFetch = async (_url, init) => {
+      const request = JSON.parse(init.body) as {
+        id: number;
+        method: string;
+      };
+      if (request.method === 'eth_getLogs') {
+        return jsonRpcResponse(request.id, [{
+          address: pool.poolAddress,
+          topics: [
+            UNISWAP_V3_SWAP_TOPIC,
+            topicAddress('0x00000000000000000000000000000000000000aa'),
+            topicAddress('0x00000000000000000000000000000000000000bb'),
+          ],
+          data: encodeWords([
+            encodeInt256(-1_500_000_000_000_000_000n),
+            encodeInt256(4_800_000_000n),
+            encodeUint256(sqrtPriceX96),
+            encodeUint256(123456789n),
+            encodeInt256(123n),
+          ]),
+          blockNumber: '0xa',
+          blockHash: '0x00000000000000000000000000000000000000000000000000000000000000ab',
+          transactionHash: '0x00000000000000000000000000000000000000000000000000000000000000cd',
+          transactionIndex: '0x2',
+          logIndex: '0x3',
+        }]);
+      }
+      if (request.method === 'eth_getBlockByNumber') {
+        return jsonRpcResponse(request.id, {
+          number: '0xa',
+          hash: '0x00000000000000000000000000000000000000000000000000000000000000ef',
+          timestamp: '0x6553f100',
+        });
+      }
+      throw new Error(`unexpected method ${request.method}`);
+    };
+
+    await expect(readUniswapV3PoolSwaps({
+      pool,
+      rpcUrl: 'https://rpc.test',
+      fromBlock: 10n,
+      toBlock: 10n,
+      fetchFn,
+    })).rejects.toThrow('EVM_REORG_CONFLICT:10');
+
+    const result = await readUniswapV3PoolSwapsWithQuality({
+      pool,
+      rpcUrl: 'https://rpc.test',
+      fromBlock: 10n,
+      toBlock: 10n,
+      fetchFn,
+      failFast: false,
+    });
+    expect(result.swaps).toEqual([]);
+    expect(result.quality).toMatchObject({
+      passed: false,
+      reorgConflicts: 1,
+    });
+  });
+
+  it('counts malformed swap logs separately from incomplete block ranges in lenient reads', async () => {
+    const pool = poolConfig();
+    const fetchFn: EvmRpcFetch = async (_url, init) => {
+      const request = JSON.parse(init.body) as {
+        id: number;
+        method: string;
+      };
+      if (request.method === 'eth_getLogs') {
+        return jsonRpcResponse(request.id, [{
+          address: '0x0000000000000000000000000000000000000099',
+          topics: [
+            UNISWAP_V3_SWAP_TOPIC,
+            topicAddress('0x00000000000000000000000000000000000000aa'),
+            topicAddress('0x00000000000000000000000000000000000000bb'),
+          ],
+          data: encodeWords([
+            encodeInt256(-1_500_000_000_000_000_000n),
+            encodeInt256(4_800_000_000n),
+            encodeUint256(123n),
+            encodeUint256(123456789n),
+            encodeInt256(123n),
+          ]),
+          blockNumber: '0xa',
+          blockHash: '0x00000000000000000000000000000000000000000000000000000000000000ab',
+          transactionHash: '0x00000000000000000000000000000000000000000000000000000000000000cd',
+          transactionIndex: '0x2',
+          logIndex: '0x3',
+        }]);
+      }
+      if (request.method === 'eth_getBlockByNumber') {
+        return jsonRpcResponse(request.id, {
+          number: '0xa',
+          hash: '0x00000000000000000000000000000000000000000000000000000000000000ab',
+          timestamp: '0x6553f100',
+        });
+      }
+      throw new Error(`unexpected method ${request.method}`);
+    };
+
+    const result = await readUniswapV3PoolSwapsWithQuality({
+      pool,
+      rpcUrl: 'https://rpc.test',
+      fromBlock: 10n,
+      toBlock: 10n,
+      fetchFn,
+      failFast: false,
+    });
+
+    expect(result.swaps).toEqual([]);
+    expect(result.quality).toMatchObject({
+      passed: false,
+      invalidLogs: 1,
+      incompleteBlockRanges: 0,
+    });
+  });
+
+  it('deduplicates logs with non-canonical hex index encodings', async () => {
+    const pool = poolConfig();
+    const sqrtPriceX96 = sqrtPriceX96ForAdjustedPrice({
+      priceToken1PerToken0: 3200,
+      token0Decimals: pool.token0.decimals,
+      token1Decimals: pool.token1.decimals,
+    });
+    const log = {
+      address: pool.poolAddress,
+      topics: [
+        UNISWAP_V3_SWAP_TOPIC,
+        topicAddress('0x00000000000000000000000000000000000000aa'),
+        topicAddress('0x00000000000000000000000000000000000000bb'),
+      ],
+      data: encodeWords([
+        encodeInt256(-1_500_000_000_000_000_000n),
+        encodeInt256(4_800_000_000n),
+        encodeUint256(sqrtPriceX96),
+        encodeUint256(123456789n),
+        encodeInt256(123n),
+      ]),
+      blockNumber: '0xa',
+      blockHash: '0x00000000000000000000000000000000000000000000000000000000000000ab',
+      transactionHash: '0x00000000000000000000000000000000000000000000000000000000000000cd',
+      transactionIndex: '0x2',
+      logIndex: '0x3',
+    };
+    const fetchFn: EvmRpcFetch = async (_url, init) => {
+      const request = JSON.parse(init.body) as {
+        id: number;
+        method: string;
+      };
+      if (request.method === 'eth_getLogs') {
+        return jsonRpcResponse(request.id, [
+          log,
+          { ...log, transactionIndex: '0x02', logIndex: '0x03' },
+        ]);
+      }
+      if (request.method === 'eth_getBlockByNumber') {
+        return jsonRpcResponse(request.id, {
+          number: '0xa',
+          hash: '0x00000000000000000000000000000000000000000000000000000000000000ab',
+          timestamp: '0x6553f100',
+        });
+      }
+      throw new Error(`unexpected method ${request.method}`);
+    };
+
+    const result = await readUniswapV3PoolSwapsWithQuality({
+      pool,
+      rpcUrl: 'https://rpc.test',
+      fromBlock: 10n,
+      toBlock: 10n,
+      fetchFn,
+      failFast: false,
+    });
+
+    expect(result.swaps).toHaveLength(1);
+    expect(result.quality).toMatchObject({
+      passed: false,
+      duplicateLogs: 1,
+    });
+  });
+
+  it('counts malformed log identity fields as invalid logs in lenient reads', async () => {
+    const pool = poolConfig();
+    const fetchFn: EvmRpcFetch = async (_url, init) => {
+      const request = JSON.parse(init.body) as {
+        id: number;
+        method: string;
+      };
+      if (request.method === 'eth_getLogs') {
+        return jsonRpcResponse(request.id, [{
+          address: pool.poolAddress,
+          topics: [
+            UNISWAP_V3_SWAP_TOPIC,
+            topicAddress('0x00000000000000000000000000000000000000aa'),
+            topicAddress('0x00000000000000000000000000000000000000bb'),
+          ],
+          data: encodeWords([
+            encodeInt256(-1_500_000_000_000_000_000n),
+            encodeInt256(4_800_000_000n),
+            encodeUint256(123n),
+            encodeUint256(123456789n),
+            encodeInt256(123n),
+          ]),
+          blockNumber: '0xa',
+          blockHash: '0x00000000000000000000000000000000000000000000000000000000000000ab',
+          transactionHash: '0x00000000000000000000000000000000000000000000000000000000000000cd',
+          transactionIndex: 'NaN',
+          logIndex: '0x3',
+        }]);
+      }
+      throw new Error(`unexpected method ${request.method}`);
+    };
+
+    const result = await readUniswapV3PoolSwapsWithQuality({
+      pool,
+      rpcUrl: 'https://rpc.test',
+      fromBlock: 10n,
+      toBlock: 10n,
+      fetchFn,
+      failFast: false,
+    });
+
+    expect(result.swaps).toEqual([]);
+    expect(result.quality).toMatchObject({
+      passed: false,
+      invalidLogs: 1,
+    });
+  });
+
+  it('rejects swap logs whose address does not match the configured pool address', async () => {
+    const pool = poolConfig();
+    const sqrtPriceX96 = sqrtPriceX96ForAdjustedPrice({
+      priceToken1PerToken0: 3200,
+      token0Decimals: pool.token0.decimals,
+      token1Decimals: pool.token1.decimals,
+    });
+    const fetchFn: EvmRpcFetch = async (_url, init) => {
+      const request = JSON.parse(init.body) as {
+        id: number;
+        method: string;
+      };
+      if (request.method === 'eth_getLogs') {
+        return jsonRpcResponse(request.id, [{
+          address: '0x0000000000000000000000000000000000000099',
+          topics: [
+            UNISWAP_V3_SWAP_TOPIC,
+            topicAddress('0x00000000000000000000000000000000000000aa'),
+            topicAddress('0x00000000000000000000000000000000000000bb'),
+          ],
+          data: encodeWords([
+            encodeInt256(-1_500_000_000_000_000_000n),
+            encodeInt256(4_800_000_000n),
+            encodeUint256(sqrtPriceX96),
+            encodeUint256(123456789n),
+            encodeInt256(123n),
+          ]),
+          blockNumber: '0xa',
+          blockHash: '0x00000000000000000000000000000000000000000000000000000000000000ab',
+          transactionHash: '0x00000000000000000000000000000000000000000000000000000000000000cd',
+          transactionIndex: '0x2',
+          logIndex: '0x3',
+        }]);
+      }
+      if (request.method === 'eth_getBlockByNumber') {
+        return jsonRpcResponse(request.id, {
+          number: '0xa',
+          hash: '0x00000000000000000000000000000000000000000000000000000000000000ab',
+          timestamp: '0x6553f100',
+        });
+      }
+      throw new Error(`unexpected method ${request.method}`);
+    };
+
+    await expect(readUniswapV3PoolSwaps({
+      pool,
+      rpcUrl: 'https://rpc.test',
+      fromBlock: 10n,
+      toBlock: 10n,
+      fetchFn,
+    })).rejects.toThrow('UNISWAP_V3_SWAP_ADDRESS_MISMATCH');
   });
 
   it('builds DEX pool candles, fill-forwards no-trade intervals, and aggregates higher timeframes', () => {
@@ -359,8 +720,9 @@ describe('dex-pool-datasets', () => {
     const qualityRows = (await readFile(join(dir, 'dex-quality.jsonl'), 'utf8'))
       .trim()
       .split('\n')
-      .map((line) => JSON.parse(line) as { qualityFlags: Record<string, boolean> });
+      .map((line) => JSON.parse(line) as { qualityFlags: Record<string, boolean>; source?: { rawSwapRange?: unknown } });
     expect(qualityRows.some((row) => row.qualityFlags.fillForwarded)).toBe(true);
+    expect(qualityRows.some((row) => row.source?.rawSwapRange !== undefined)).toBe(true);
 
     const storedManifest = JSON.parse(await readFile(join(dir, 'manifest.json'), 'utf8')) as typeof result.manifest;
     expect(storedManifest.timeframes).toEqual({ WETHUSDC: ['1m', '3m'] });
@@ -406,6 +768,47 @@ describe('dex-pool-datasets', () => {
       outputDir: dir,
       now: new Date('2026-06-01T00:00:00.000Z'),
     })).rejects.toThrow('DEX_REPLAY_PERIOD_FROM_MISMATCH');
+  });
+
+  it('rejects malformed candle numbers and invalid timeframe intervals during export', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'dex-pool-dataset-'));
+    tempDirs.push(dir);
+    const pool = poolConfig();
+    const oneMinute = fillNoTradeIntervals({
+      candles: buildCandlesFromSwaps({
+        pool,
+        timeframe: '1m',
+        swaps: [
+          swap({ blockTimestamp: 1_700_000_000, price: 2000, amount0: -1, amount1: 2000, logIndex: 1 }),
+          swap({ blockTimestamp: 1_700_000_120, price: 2020, amount0: -1, amount1: 2020, blockNumber: 12n, logIndex: 1 }),
+        ],
+      }),
+      timeframe: '1m',
+      fromTime: 1_700_000_000_000,
+      toTime: 1_700_000_120_000,
+    });
+
+    await expect(exportDexWalkForwardDataset({
+      truthManifest: truthManifest(pool, {
+        from: '2023-11-14T22:13:00.000Z',
+        to: '2023-11-14T22:15:59.999Z',
+        timeframes: ['1m'],
+      }),
+      candlesByTimeframe: { '1m': [{ ...oneMinute[0]!, open: Number.NaN }, ...oneMinute.slice(1)] },
+      outputDir: dir,
+      now: new Date('2026-06-01T00:00:00.000Z'),
+    })).rejects.toThrow('DEX_REPLAY_INVALID_NUMBER');
+
+    await expect(exportDexWalkForwardDataset({
+      truthManifest: truthManifest(pool, {
+        from: '2023-11-14T22:13:00.000Z',
+        to: '2023-11-14T22:15:59.999Z',
+        timeframes: ['1m'],
+      }),
+      candlesByTimeframe: { '1m': [{ ...oneMinute[0]!, closeTime: oneMinute[0]!.openTime + 30_000 }, ...oneMinute.slice(1)] },
+      outputDir: dir,
+      now: new Date('2026-06-01T00:00:00.000Z'),
+    })).rejects.toThrow('DEX_REPLAY_INVALID_INTERVAL');
   });
 
   it('computes the same checksum for the same dataset in different output directories', async () => {
@@ -514,6 +917,7 @@ function truthManifest(
     quality: {
       passed: true,
       duplicateLogs: 0,
+      invalidLogs: 0,
       missingBlockTimestamps: 0,
       reorgConflicts: 0,
       noTradeIntervals: 1,

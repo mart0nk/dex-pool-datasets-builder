@@ -6,6 +6,9 @@ export const UNISWAP_V3_SWAP_TOPIC =
   '0xc42079f94a6350d7e6235f29174924f928cc2ac818eb64fed8004e115fbcca67' as const;
 
 const WORD_HEX_LENGTH = 64;
+const SWAP_TOPIC_COUNT = 3;
+const SWAP_DATA_WORDS = 5;
+const ABI_HEX_PATTERN = /^[a-fA-F0-9]+$/;
 const TWO_256 = 1n << 256n;
 const TWO_255 = 1n << 255n;
 const Q192 = 1n << 192n;
@@ -19,9 +22,16 @@ export function decodeUniswapV3SwapLog(input: {
   if (input.pool.kind !== 'UNISWAP_V3_STYLE') {
     throw new Error(`UNSUPPORTED_POOL_KIND_FOR_V3_DECODER:${input.pool.kind}`);
   }
+  if (input.log.address.toLowerCase() !== input.pool.poolAddress.toLowerCase()) {
+    throw new Error(`UNISWAP_V3_SWAP_ADDRESS_MISMATCH:${input.pool.poolAddress}:${input.log.address}:${input.log.transactionHash}:${input.log.logIndex}`);
+  }
+  if (input.log.topics.length !== SWAP_TOPIC_COUNT) {
+    throw new Error(`UNISWAP_V3_SWAP_TOPIC_COUNT_INVALID:${input.log.transactionHash}:${input.log.logIndex}:${input.log.topics.length}`);
+  }
   if (input.log.topics[0]?.toLowerCase() !== UNISWAP_V3_SWAP_TOPIC) {
     throw new Error(`UNISWAP_V3_SWAP_TOPIC_MISMATCH:${input.log.transactionHash}:${input.log.logIndex}`);
   }
+  assertSwapDataShape(input.log.data, input.log.transactionHash, input.log.logIndex);
 
   const amount0Raw = decodeSignedWord(input.log.data, 0);
   const amount1Raw = decodeSignedWord(input.log.data, 1);
@@ -52,8 +62,11 @@ export function decodeUniswapV3SwapLog(input: {
     token1Symbol: input.pool.token1.symbol,
     amount0: formatUnitsToNumber(amount0Raw, input.pool.token0.decimals),
     amount1: formatUnitsToNumber(amount1Raw, input.pool.token1.decimals),
+    amount0Raw: amount0Raw.toString(),
+    amount1Raw: amount1Raw.toString(),
     priceToken1PerToken0,
     priceToken0PerToken1: 1 / priceToken1PerToken0,
+    sqrtPriceX96Raw: sqrtPriceX96.toString(),
     liquidityAfter: liquidity.toString(),
     tickAfter: tick,
     raw: input.log,
@@ -102,4 +115,15 @@ function readWord(data: HexString, wordIndex: number): string {
     throw new Error(`ABI_WORD_MISSING:${wordIndex}`);
   }
   return word;
+}
+
+function assertSwapDataShape(data: HexString, transactionHash: string, logIndex: HexString): void {
+  const hex = data.startsWith('0x') ? data.slice(2) : data;
+  if (!ABI_HEX_PATTERN.test(hex)) {
+    throw new Error(`UNISWAP_V3_SWAP_DATA_INVALID_HEX:${transactionHash}:${logIndex}`);
+  }
+  const expectedLength = SWAP_DATA_WORDS * WORD_HEX_LENGTH;
+  if (hex.length !== expectedLength) {
+    throw new Error(`UNISWAP_V3_SWAP_DATA_LENGTH_INVALID:${transactionHash}:${logIndex}:${hex.length}`);
+  }
 }

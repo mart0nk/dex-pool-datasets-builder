@@ -39,8 +39,11 @@ export type NormalizedPoolSwap = {
   token1Symbol: string;
   amount0: number;
   amount1: number;
+  amount0Raw?: string;
+  amount1Raw?: string;
   priceToken1PerToken0: number;
   priceToken0PerToken1: number;
+  sqrtPriceX96Raw?: string;
   liquidityAfter?: string;
   tickAfter?: number;
   raw?: unknown;
@@ -60,6 +63,18 @@ export type DexPoolCandleSource = {
   fromBlock?: string;
   toBlock?: string;
   blockHashRange?: string[];
+  rawSwapRange?: {
+    first: DexPoolSwapRawAudit;
+    last: DexPoolSwapRawAudit;
+  };
+};
+
+export type DexPoolSwapRawAudit = {
+  transactionHash: string;
+  logIndex: number;
+  amount0Raw?: string;
+  amount1Raw?: string;
+  sqrtPriceX96Raw?: string;
 };
 
 export type DexPoolCandle = {
@@ -87,6 +102,7 @@ export type DexPoolCandle = {
 export type DexPoolQualitySummary = {
   passed: boolean;
   duplicateLogs: number;
+  invalidLogs: number;
   missingBlockTimestamps: number;
   reorgConflicts: number;
   noTradeIntervals: number;

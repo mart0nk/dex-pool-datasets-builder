@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join, relative, resolve } from 'node:path';
 import type { Timeframe } from '../contracts/timeframe.js';
+import { getTimeframeMs } from '../contracts/timeframe.js';
 import type {
   DatasetManifest,
   HistoricalKline,
@@ -150,17 +151,19 @@ export function toHistoricalKline(candle: DexPoolCandle): HistoricalKline {
 }
 
 function validateReplayContinuity(candles: DexPoolCandle[], timeframe: Timeframe): void {
-  const intervalMs = candles[0]?.closeTime !== undefined
-    ? candles[0].closeTime - candles[0].openTime + 1
-    : 0;
-  if (intervalMs <= 0) {
-    throw new Error(`DEX_REPLAY_INVALID_INTERVAL:${timeframe}`);
-  }
+  const intervalMs = getTimeframeMs(timeframe);
 
   let previousOpenTime = Number.NEGATIVE_INFINITY;
   for (const candle of candles) {
+    assertFiniteCandleNumbers(candle, timeframe);
     if (candle.timeframe !== timeframe) {
       throw new Error(`DEX_REPLAY_TIMEFRAME_MISMATCH:${candle.symbol}:${timeframe}:${candle.timeframe}`);
+    }
+    if (candle.closeTime !== candle.openTime + intervalMs - 1) {
+      throw new Error(`DEX_REPLAY_INVALID_INTERVAL:${candle.symbol}:${timeframe}:${candle.openTime}:${candle.closeTime}`);
+    }
+    if (candle.openTime % intervalMs !== 0) {
+      throw new Error(`DEX_REPLAY_TIME_MISALIGNED:${candle.symbol}:${timeframe}:${candle.openTime}`);
     }
     if (candle.openTime <= previousOpenTime) {
       throw new Error(`DEX_REPLAY_UNSORTED:${candle.symbol}:${timeframe}:${candle.openTime}`);
@@ -172,11 +175,32 @@ function validateReplayContinuity(candles: DexPoolCandle[], timeframe: Timeframe
       candle.open <= 0 ||
       candle.high < Math.max(candle.open, candle.close) ||
       candle.low > Math.min(candle.open, candle.close) ||
+      candle.high < candle.low ||
       candle.low <= 0
     ) {
       throw new Error(`DEX_REPLAY_INVALID_OHLC:${candle.symbol}:${timeframe}:${candle.openTime}`);
     }
+    if (candle.volumeBase < 0 || candle.volumeQuote < 0 || candle.tradeCount < 0) {
+      throw new Error(`DEX_REPLAY_INVALID_VOLUME:${candle.symbol}:${timeframe}:${candle.openTime}`);
+    }
     previousOpenTime = candle.openTime;
+  }
+}
+
+function assertFiniteCandleNumbers(candle: DexPoolCandle, timeframe: Timeframe): void {
+  const values = [
+    candle.openTime,
+    candle.closeTime,
+    candle.open,
+    candle.high,
+    candle.low,
+    candle.close,
+    candle.volumeBase,
+    candle.volumeQuote,
+    candle.tradeCount,
+  ];
+  if (!values.every(Number.isFinite)) {
+    throw new Error(`DEX_REPLAY_INVALID_NUMBER:${candle.symbol}:${timeframe}:${candle.openTime}`);
   }
 }
 

@@ -3,6 +3,7 @@ import { getTimeframeMs } from '../contracts/timeframe.js';
 import type {
   DexPoolCandle,
   DexPoolConfig,
+  DexPoolSwapRawAudit,
   NormalizedPoolSwap,
 } from '../types/dex-pool-dataset.types.js';
 import { buildReplaySymbol } from '../registry/pool-registry.js';
@@ -83,6 +84,10 @@ function buildCandleFromBucket(
       fromBlock: first.blockNumber.toString(),
       toBlock: last.blockNumber.toString(),
       blockHashRange: [first.blockHash, last.blockHash],
+      rawSwapRange: {
+        first: buildRawSwapAudit(first),
+        last: buildRawSwapAudit(last),
+      },
     },
     qualityFlags: bucket.length <= 1 ? { lowTradeCount: true } : {},
   };
@@ -132,4 +137,14 @@ function validateSwap(swap: NormalizedPoolSwap): void {
   ) {
     throw new Error(`INVALID_DERIVED_PRICE:${swap.transactionHash}:${swap.logIndex}`);
   }
+}
+
+function buildRawSwapAudit(swap: NormalizedPoolSwap): DexPoolSwapRawAudit {
+  return {
+    transactionHash: swap.transactionHash,
+    logIndex: swap.logIndex,
+    ...(swap.amount0Raw !== undefined ? { amount0Raw: swap.amount0Raw } : {}),
+    ...(swap.amount1Raw !== undefined ? { amount1Raw: swap.amount1Raw } : {}),
+    ...(swap.sqrtPriceX96Raw !== undefined ? { sqrtPriceX96Raw: swap.sqrtPriceX96Raw } : {}),
+  } satisfies DexPoolSwapRawAudit;
 }
