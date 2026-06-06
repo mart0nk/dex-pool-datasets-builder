@@ -11,3 +11,6 @@ export * from './candles/pool-candle-builder.js';
 export * from './candles/no-trade-fill-policy.js';
 export * from './candles/timeframe-aggregator.js';
 export * from './export/walk-forward-export-adapter.js';
+export * from './storage/index.js';
+export { exportDexWalkForwardDatasetToStorage } from './export/walk-forward-storage-export-adapter.js';
+export type { ExportDexWalkForwardToStorageOptions, ExportDexWalkForwardToStorageResult } from './export/walk-forward-storage-export-adapter.js';
