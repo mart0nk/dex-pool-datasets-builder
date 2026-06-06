@@ -14,3 +14,4 @@ export * from './export/walk-forward-export-adapter.js';
 export * from './storage/index.js';
 export { exportDexWalkForwardDatasetToStorage } from './export/walk-forward-storage-export-adapter.js';
 export type { ExportDexWalkForwardToStorageOptions, ExportDexWalkForwardToStorageResult } from './export/walk-forward-storage-export-adapter.js';
+export * from './orchestrator/index.js';
