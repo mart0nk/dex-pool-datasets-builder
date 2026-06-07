@@ -1,6 +1,6 @@
-# @trader-agent/dex-pool-datasets
+# @dex-pool-datasets
 
-Builds audit-friendly DEX pool candle datasets and exports replay-compatible JSONL datasets for trader-agent walk-forward diagnostics.
+Builds audit-friendly DEX pool candle datasets and exports replay-compatible JSONL datasets for walk-forward diagnostics.
 
 Current scope:
 
