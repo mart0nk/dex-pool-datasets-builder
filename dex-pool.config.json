@@ -1,0 +1,14 @@
+{
+  "chain": "base",
+  "rpc": "env:BASE_RPC_URL",
+  "pool": "0x0000000000000000000000000000000000000000",
+  "from": "2024-01-01",
+  "to": "2024-01-02",
+  "timeframes": [
+    "1m",
+    "5m",
+    "15m",
+    "1h"
+  ],
+  "out": "./data/dex-pool-datasets"
+}
