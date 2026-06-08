@@ -2,16 +2,12 @@ import type { Timeframe } from "../contracts/timeframe.js";
 import { ALL_TIMEFRAMES } from "../contracts/timeframe.js";
 import type { ResolvedDexBuildConfig } from "../config/dex-build-config.types.js";
 import type { DexChain } from "../types/dex-pool-dataset.types.js";
-import {
-  createEvmJsonRpcClient,
-  type HexString,
-} from "../evm/evm-json-rpc-client.js";
+import { createEvmJsonRpcClient } from "../evm/evm-json-rpc-client.js";
 import { getSimpleChainPreset } from "./chain-presets.js";
 import { readUniswapV3PoolConfig } from "./evm-contract-reader.js";
 import { resolveDateBlockRange } from "./resolve-date-block-range.js";
+import { resolvePoolSelection } from "./resolve-pool-selection.js";
 import type { SimpleDexBuildInput } from "./simple-build.types.js";
-
-const EVM_ADDRESS_PATTERN = /^0x[a-fA-F0-9]{40}$/;
 
 const DEFAULT_BASE_TIMEFRAME: Timeframe = "1m";
 const DEFAULT_TIMEFRAMES: Timeframe[] = ["1m", "5m", "15m", "1h", "4h"];
@@ -47,16 +43,25 @@ export async function resolveSimpleDexBuildConfig(
     to,
   });
 
-  const poolAddress = assertEvmAddress(input.pool, "pool");
+  const poolSelection = await resolvePoolSelection({
+    client,
+    chain: preset.chain,
+    pool: input.pool,
+    pair: input.pair,
+    fee: input.fee,
+    token0: input.token0,
+    token1: input.token1,
+    base: input.base,
+    quote: input.quote,
+  });
 
   const pool = await readUniswapV3PoolConfig({
     client,
     chain: preset.chain,
-    dex: input.dex ?? preset.defaultDex,
-    poolAddress,
+    poolAddress: poolSelection.poolAddress,
     startBlock: blockRange.fromBlock.toString(),
-    base: input.base,
-    quote: input.quote,
+    base: poolSelection.base ?? input.base,
+    quote: poolSelection.quote ?? input.quote,
   });
 
   const timeframes = normalizeTimeframes(
@@ -135,14 +140,6 @@ export function resolveSimpleRpcUrl(input: {
   return rpcUrl;
 }
 
-export function assertEvmAddress(value: string, fieldName: string): HexString {
-  if (!EVM_ADDRESS_PATTERN.test(value)) {
-    throw new Error(`SIMPLE_ADDRESS_INVALID:${fieldName}:${value}`);
-  }
-
-  return value as HexString;
-}
-
 function deriveToDate(from: string, days: number | undefined): string {
   if (days === undefined) {
     throw new Error("SIMPLE_TO_OR_DAYS_REQUIRED");
@@ -206,5 +203,5 @@ function buildSimpleDatasetId(input: {
   const fromPart = input.from.slice(0, 10).replace(/[^0-9]/g, "");
   const toPart = input.to.slice(0, 10).replace(/[^0-9]/g, "");
 
-  return `${input.chain}-${input.poolId}-${fromPart}-${toPart}`;
+  return `${input.poolId}-${fromPart}-${toPart}`;
 }

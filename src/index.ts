@@ -18,7 +18,13 @@ export * from "./candles/timeframe-aggregator.js";
 export * from "./export/walk-forward-export-adapter.js";
 
 export * from "./simple/simple-build.types.js";
+export * from "./simple/simple-dex.constants.js";
 export * from "./simple/chain-presets.js";
+export * from "./simple/evm-address.js";
+export * from "./simple/token-presets.js";
+export * from "./simple/uniswap-v3-factory-presets.js";
+export * from "./simple/liquid-pair-presets.js";
+export * from "./simple/resolve-pool-selection.js";
 export * from "./simple/resolve-date-block-range.js";
 export * from "./simple/evm-contract-reader.js";
 export * from "./simple/resolve-simple-build-config.js";

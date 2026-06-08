@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 
+import "dotenv/config";
+
 import { Command } from "commander";
 import { registerValidateCommand } from "./commands/validate.command.js";
 import { registerPlanCommand } from "./commands/plan.command.js";

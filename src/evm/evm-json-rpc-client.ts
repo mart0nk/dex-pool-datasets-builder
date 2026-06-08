@@ -6,6 +6,7 @@ export type EvmRpcFetch = (
     method: "POST";
     headers: Record<string, string>;
     body: string;
+    signal?: AbortSignal;
   },
 ) => Promise<{
   ok: boolean;
@@ -45,6 +46,34 @@ export type EvmCallInput = {
   blockTag?: EvmBlockTag;
 };
 
+export type EvmJsonRpcClientOptions = {
+  rpcUrl: string;
+  fetchFn?: EvmRpcFetch;
+
+  /**
+   * Number of retries after the initial request.
+   *
+   * Example:
+   * retries=5 means max 6 attempts total.
+   */
+  retries?: number;
+
+  /**
+   * Initial retry delay.
+   */
+  retryBaseDelayMs?: number;
+
+  /**
+   * Maximum retry delay.
+   */
+  retryMaxDelayMs?: number;
+
+  /**
+   * Per-request timeout.
+   */
+  timeoutMs?: number;
+};
+
 export type EvmJsonRpcClient = {
   getLogs(input: GetLogsInput): Promise<EvmLog[]>;
   getBlockByNumber(blockNumber: bigint): Promise<EvmBlock>;
@@ -53,51 +82,93 @@ export type EvmJsonRpcClient = {
   call(input: EvmCallInput): Promise<HexString>;
 };
 
-export function createEvmJsonRpcClient(input: {
-  rpcUrl: string;
-  fetchFn?: EvmRpcFetch;
-}): EvmJsonRpcClient {
+export function createEvmJsonRpcClient(
+  input: EvmJsonRpcClientOptions,
+): EvmJsonRpcClient {
   const fetchFn = input.fetchFn ?? defaultFetch;
+  const retries = input.retries ?? 5;
+  const retryBaseDelayMs = input.retryBaseDelayMs ?? 500;
+  const retryMaxDelayMs = input.retryMaxDelayMs ?? 10_000;
+  const timeoutMs = input.timeoutMs ?? 30_000;
+
   let nextId = 1;
 
   async function request<T>(method: string, params: unknown[]): Promise<T> {
     const id = nextId;
     nextId += 1;
 
-    const response = await fetchFn(input.rpcUrl, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id,
-        method,
-        params,
-      }),
-    });
+    let lastError: unknown;
 
-    if (!response.ok) {
-      const text = await response.text().catch(() => "");
-      throw new Error(`EVM_RPC_HTTP_ERROR:${response.status}:${text}`);
+    for (let attempt = 0; attempt <= retries; attempt += 1) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => {
+        controller.abort();
+      }, timeoutMs);
+
+      try {
+        const response = await fetchFn(input.rpcUrl, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id,
+            method,
+            params,
+          }),
+          signal: controller.signal,
+        });
+
+        const text = await response.text();
+
+        if (!response.ok) {
+          const error = new RetryableRpcError(
+            `EVM_RPC_HTTP_ERROR:${response.status}:${text}`,
+            isRetryableHttpStatus(response.status) || isRateLimitText(text),
+          );
+
+          throw error;
+        }
+
+        const json = JSON.parse(text) as {
+          id?: number;
+          result?: T;
+          error?: { code?: number; message?: string };
+        };
+
+        if (json.error !== undefined) {
+          const code = json.error.code ?? "unknown";
+          const message = json.error.message ?? "";
+          const error = new RetryableRpcError(
+            `EVM_RPC_ERROR:${method}:${code}:${message}`,
+            isRetryableJsonRpcError(json.error.code, message),
+          );
+
+          throw error;
+        }
+
+        if (json.result === undefined) {
+          throw new Error(`EVM_RPC_RESULT_MISSING:${method}:${id}`);
+        }
+
+        return json.result;
+      } catch (error: unknown) {
+        lastError = error;
+
+        const retryable = isRetryableCaughtError(error);
+
+        if (!retryable || attempt >= retries) {
+          throw error;
+        }
+
+        await sleep(
+          getRetryDelayMs(attempt, retryBaseDelayMs, retryMaxDelayMs),
+        );
+      } finally {
+        clearTimeout(timeout);
+      }
     }
 
-    const text = await response.text();
-    const json = JSON.parse(text) as {
-      id?: number;
-      result?: T;
-      error?: { code?: number; message?: string };
-    };
-
-    if (json.error !== undefined) {
-      throw new Error(
-        `EVM_RPC_ERROR:${method}:${json.error.code ?? "unknown"}:${json.error.message ?? ""}`,
-      );
-    }
-
-    if (json.result === undefined) {
-      throw new Error(`EVM_RPC_RESULT_MISSING:${method}:${id}`);
-    }
-
-    return json.result;
+    throw lastError instanceof Error ? lastError : new Error(String(lastError));
   }
 
   return {
@@ -165,6 +236,112 @@ export function hexToNumber(value: HexString): number {
 
 function toBlockTag(value: EvmBlockTag): HexString | "latest" {
   return value === "latest" ? "latest" : toQuantityHex(value);
+}
+
+class RetryableRpcError extends Error {
+  public readonly retryable: boolean;
+
+  constructor(message: string, retryable: boolean) {
+    super(message);
+    this.name = "RetryableRpcError";
+    this.retryable = retryable;
+  }
+}
+
+function isRetryableCaughtError(error: unknown): boolean {
+  if (error instanceof RetryableRpcError) {
+    return error.retryable;
+  }
+
+  if (error instanceof Error && error.name === "AbortError") {
+    return true;
+  }
+
+  const message = error instanceof Error ? error.message : String(error);
+
+  return (
+    message.includes("fetch failed") ||
+    message.includes("ECONNRESET") ||
+    message.includes("ETIMEDOUT") ||
+    message.includes("EAI_AGAIN") ||
+    isRateLimitText(message)
+  );
+}
+
+function isRetryableHttpStatus(status: number): boolean {
+  return (
+    status === 408 ||
+    status === 425 ||
+    status === 429 ||
+    status === 500 ||
+    status === 502 ||
+    status === 503 ||
+    status === 504
+  );
+}
+
+function isRetryableJsonRpcError(
+  code: number | undefined,
+  message: string,
+): boolean {
+  if (code === -32016 || code === -32005 || code === -32000) {
+    return (
+      isRateLimitText(message) ||
+      isTimeoutText(message) ||
+      isCapacityText(message)
+    );
+  }
+
+  return (
+    isRateLimitText(message) ||
+    isTimeoutText(message) ||
+    isCapacityText(message)
+  );
+}
+
+function isRateLimitText(text: string): boolean {
+  const normalized = text.toLowerCase();
+
+  return (
+    normalized.includes("rate limit") ||
+    normalized.includes("rate-limit") ||
+    normalized.includes("over rate limit") ||
+    normalized.includes("too many requests") ||
+    normalized.includes("429")
+  );
+}
+
+function isTimeoutText(text: string): boolean {
+  const normalized = text.toLowerCase();
+
+  return normalized.includes("timeout") || normalized.includes("timed out");
+}
+
+function isCapacityText(text: string): boolean {
+  const normalized = text.toLowerCase();
+
+  return (
+    normalized.includes("temporarily unavailable") ||
+    normalized.includes("service unavailable") ||
+    normalized.includes("capacity") ||
+    normalized.includes("busy")
+  );
+}
+
+function getRetryDelayMs(
+  attempt: number,
+  baseDelayMs: number,
+  maxDelayMs: number,
+): number {
+  const exponentialDelay = baseDelayMs * 2 ** attempt;
+  const jitter = Math.floor(Math.random() * baseDelayMs);
+  return Math.min(exponentialDelay + jitter, maxDelayMs);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
 }
 
 const defaultFetch: EvmRpcFetch = async (url, init) => {

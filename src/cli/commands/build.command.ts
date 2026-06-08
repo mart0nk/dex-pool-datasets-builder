@@ -22,6 +22,10 @@ type BuildCommandOptions = {
   verbose?: boolean;
 
   chain?: string;
+  pair?: string;
+  fee?: string;
+  token0?: string;
+  token1?: string;
   from?: string;
   to?: string;
   days?: string;
@@ -30,7 +34,6 @@ type BuildCommandOptions = {
   out?: string;
   base?: string;
   quote?: string;
-  dex?: string;
   timeframes?: string;
   baseTimeframe?: string;
   chunkSize?: string;
@@ -62,10 +65,6 @@ function formatQualityFailures(quality: DexPoolQualitySummary): string {
 
   if (quality.extremeWickCandles > 0) {
     failures.push(`extremeWickCandles: ${quality.extremeWickCandles}`);
-  }
-
-  if (quality.noTradeIntervals > 0) {
-    failures.push(`noTradeIntervals: ${quality.noTradeIntervals}`);
   }
 
   return failures.join(", ");
@@ -105,6 +104,12 @@ export function formatRunReport(
 
       if (pool.quality.passed) {
         lines.push(`   Quality: ${qualityLabel}`);
+
+        if (pool.quality.noTradeIntervals > 0) {
+          lines.push(
+            `   Filled no-trade intervals: ${pool.quality.noTradeIntervals}`,
+          );
+        }
       } else {
         const failures = formatQualityFailures(pool.quality);
         lines.push(
@@ -228,10 +233,6 @@ async function resolveSimpleBuildConfigFromCli(
     throw new Error("SIMPLE_CHAIN_REQUIRED");
   }
 
-  if (options.pool === undefined) {
-    throw new Error("SIMPLE_POOL_REQUIRED");
-  }
-
   if (options.from === undefined) {
     throw new Error("SIMPLE_FROM_REQUIRED");
   }
@@ -239,6 +240,10 @@ async function resolveSimpleBuildConfigFromCli(
   return resolveSimpleDexBuildConfig({
     chain: options.chain,
     pool: options.pool,
+    pair: options.pair,
+    fee: options.fee,
+    token0: options.token0,
+    token1: options.token1,
     from: options.from,
     to: options.to,
     days: options.days !== undefined ? Number(options.days) : undefined,
@@ -247,7 +252,6 @@ async function resolveSimpleBuildConfigFromCli(
     out: options.out ?? options.output,
     base: options.base,
     quote: options.quote,
-    dex: options.dex,
     datasetId: options.datasetId,
     baseTimeframe: options.baseTimeframe,
     timeframes: parseTimeframes(options.timeframes),
@@ -268,7 +272,11 @@ function simpleInputFromConfig(
 
   return {
     chain: requiredString(rawConfig.chain, "chain"),
-    pool: options.pool ?? requiredString(rawConfig.pool, "pool"),
+    pool: options.pool ?? optionalString(rawConfig.pool),
+    pair: options.pair ?? optionalString(rawConfig.pair),
+    fee: options.fee ?? optionalStringOrNumber(rawConfig.fee),
+    token0: options.token0 ?? optionalString(rawConfig.token0),
+    token1: options.token1 ?? optionalString(rawConfig.token1),
     from: requiredString(rawConfig.from, "from"),
     to: optionalString(rawConfig.to),
     days: typeof rawConfig.days === "number" ? rawConfig.days : undefined,
@@ -279,7 +287,6 @@ function simpleInputFromConfig(
     out: options.out ?? options.output ?? optionalString(rawConfig.out),
     base: options.base ?? optionalString(rawConfig.base),
     quote: options.quote ?? optionalString(rawConfig.quote),
-    dex: optionalString(rawConfig.dex),
     datasetId: options.datasetId ?? optionalString(rawConfig.datasetId),
     baseTimeframe: optionalString(rawConfig.baseTimeframe),
     timeframes: Array.isArray(rawConfig.timeframes)
@@ -329,17 +336,39 @@ function optionalString(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
+function optionalStringOrNumber(value: unknown): string | undefined {
+  if (typeof value === "string" && value.length > 0) {
+    return value;
+  }
+
+  if (typeof value === "number") {
+    return String(value);
+  }
+
+  return undefined;
+}
+
 export function registerBuildCommand(program: Command): void {
   program
     .command("build")
     .description(
-      "Build DEX pool dataset. Use --config for advanced mode, or --chain/--pool/--from/--to for simple mode.",
+      "Build DEX pool dataset. Use --config for config mode, or --chain/--pair/--from/--to for simple mode.",
     )
     .option("-c, --config <path>", "Path to config file")
     .option("--profile <profile>", "Advanced config profile to use")
     .option(
       "--pool <pool>",
       "Simple mode pool address, or advanced mode pool ID",
+    )
+    .option("--pair <pair>", "Simple mode pair selector, e.g. WETH/USDC")
+    .option("--fee <fee>", "Simple mode Uniswap v3 fee tier, e.g. 500")
+    .option(
+      "--token0 <address>",
+      "Simple mode token0/tokenA address for factory.getPool",
+    )
+    .option(
+      "--token1 <address>",
+      "Simple mode token1/tokenB address for factory.getPool",
     )
     .option("--output <uri>", "Output URI override, local:// or s3://")
     .option("--json", "Output run report as JSON")
@@ -359,7 +388,6 @@ export function registerBuildCommand(program: Command): void {
     .option("--out <pathOrUri>", "Simple mode output path or URI")
     .option("--base <symbolOrAddress>", "Base token selector, e.g. WETH")
     .option("--quote <symbolOrAddress>", "Quote token selector, e.g. USDC")
-    .option("--dex <dex>", "DEX label, default from chain preset")
     .option(
       "--timeframes <list>",
       "Comma-separated timeframes, e.g. 1m,5m,15m,1h",

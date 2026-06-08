@@ -4,7 +4,6 @@ export type SimpleChainPreset = {
   chain: DexChain;
   chainId: number;
   defaultRpcUrlEnv: string;
-  defaultDex: string;
   finalityConfirmations: number;
 };
 
@@ -13,7 +12,6 @@ export const SIMPLE_CHAIN_PRESETS: Record<DexChain, SimpleChainPreset> = {
     chain: "ethereum",
     chainId: 1,
     defaultRpcUrlEnv: "ETH_RPC_URL",
-    defaultDex: "uniswap_v3",
     finalityConfirmations: 64,
   },
 
@@ -21,7 +19,6 @@ export const SIMPLE_CHAIN_PRESETS: Record<DexChain, SimpleChainPreset> = {
     chain: "base",
     chainId: 8453,
     defaultRpcUrlEnv: "BASE_RPC_URL",
-    defaultDex: "uniswap_v3",
     finalityConfirmations: 64,
   },
 
@@ -29,7 +26,6 @@ export const SIMPLE_CHAIN_PRESETS: Record<DexChain, SimpleChainPreset> = {
     chain: "arbitrum",
     chainId: 42161,
     defaultRpcUrlEnv: "ARBITRUM_RPC_URL",
-    defaultDex: "uniswap_v3",
     finalityConfirmations: 64,
   },
 
@@ -37,7 +33,6 @@ export const SIMPLE_CHAIN_PRESETS: Record<DexChain, SimpleChainPreset> = {
     chain: "polygon",
     chainId: 137,
     defaultRpcUrlEnv: "POLYGON_RPC_URL",
-    defaultDex: "uniswap_v3",
     finalityConfirmations: 128,
   },
 
@@ -45,7 +40,6 @@ export const SIMPLE_CHAIN_PRESETS: Record<DexChain, SimpleChainPreset> = {
     chain: "bsc",
     chainId: 56,
     defaultRpcUrlEnv: "BSC_RPC_URL",
-    defaultDex: "uniswap_v3",
     finalityConfirmations: 64,
   },
 };

@@ -9,6 +9,10 @@ import type {
   EvmJsonRpcClient,
   HexString,
 } from "../evm/evm-json-rpc-client.js";
+import {
+  SIMPLE_SUPPORTED_DEX,
+  SIMPLE_SUPPORTED_POOL_KIND,
+} from "./simple-dex.constants.js";
 
 const SELECTOR_TOKEN0 = "0x0dfe1681" as const;
 const SELECTOR_TOKEN1 = "0xd21220a7" as const;
@@ -19,7 +23,6 @@ const SELECTOR_DECIMALS = "0x313ce567" as const;
 export async function readUniswapV3PoolConfig(input: {
   client: EvmJsonRpcClient;
   chain: DexChain;
-  dex: string;
   poolAddress: HexString;
   startBlock: string;
   base?: string;
@@ -55,15 +58,14 @@ export async function readUniswapV3PoolConfig(input: {
   return {
     id: buildGeneratedPoolId({
       chain: input.chain,
-      dex: input.dex,
       baseSymbol,
       quoteSymbol,
       feeTier,
       poolAddress: input.poolAddress,
     }),
     chain: input.chain,
-    dex: input.dex,
-    kind: "UNISWAP_V3_STYLE",
+    dex: SIMPLE_SUPPORTED_DEX,
+    kind: SIMPLE_SUPPORTED_POOL_KIND,
     poolAddress: input.poolAddress,
     token0,
     token1,
@@ -248,7 +250,6 @@ function matchTokenRef(
 
 function buildGeneratedPoolId(input: {
   chain: DexChain;
-  dex: string;
   baseSymbol: string;
   quoteSymbol: string;
   feeTier: number;
@@ -256,7 +257,7 @@ function buildGeneratedPoolId(input: {
 }): string {
   return [
     input.chain,
-    sanitizeIdPart(input.dex),
+    sanitizeIdPart(SIMPLE_SUPPORTED_DEX),
     sanitizeIdPart(input.baseSymbol),
     sanitizeIdPart(input.quoteSymbol),
     String(input.feeTier),

@@ -2,10 +2,8 @@ import type { Command } from "commander";
 import { createEvmJsonRpcClient } from "../../evm/evm-json-rpc-client.js";
 import { getSimpleChainPreset } from "../../simple/chain-presets.js";
 import { readUniswapV3PoolConfig } from "../../simple/evm-contract-reader.js";
-import {
-  assertEvmAddress,
-  resolveSimpleRpcUrl,
-} from "../../simple/resolve-simple-build-config.js";
+import { resolvePoolSelection } from "../../simple/resolve-pool-selection.js";
+import { resolveSimpleRpcUrl } from "../../simple/resolve-simple-build-config.js";
 import { printJson, printLine } from "../cli-output.js";
 
 type DoctorCommandOptions = {
@@ -13,6 +11,10 @@ type DoctorCommandOptions = {
   rpc?: string;
   rpcEnv?: string;
   pool?: string;
+  pair?: string;
+  fee?: string;
+  token0?: string;
+  token1?: string;
   json?: boolean;
 };
 
@@ -57,13 +59,30 @@ export async function runDoctorCommand(
       detail: latestBlock.toString(),
     });
 
-    if (options.pool !== undefined) {
+    const hasPoolSelection =
+      options.pool !== undefined ||
+      options.pair !== undefined ||
+      options.token0 !== undefined ||
+      options.token1 !== undefined;
+
+    if (hasPoolSelection) {
+      const poolSelection = await resolvePoolSelection({
+        client,
+        chain: preset.chain,
+        pool: options.pool,
+        pair: options.pair,
+        fee: options.fee,
+        token0: options.token0,
+        token1: options.token1,
+      });
+
       const pool = await readUniswapV3PoolConfig({
         client,
         chain: preset.chain,
-        dex: preset.defaultDex,
-        poolAddress: assertEvmAddress(options.pool, "pool"),
+        poolAddress: poolSelection.poolAddress,
         startBlock: "0",
+        base: poolSelection.base,
+        quote: poolSelection.quote,
       });
 
       checks.push({
@@ -100,12 +119,16 @@ export function registerDoctorCommand(program: Command): void {
   program
     .command("doctor")
     .description(
-      "Check RPC, chain ID, latest block, and optionally pool metadata",
+      "Check RPC, chain ID, latest block, and optionally pool/pair metadata",
     )
     .requiredOption("--chain <chain>", "Chain, e.g. base")
     .option("--rpc <url>", "Direct RPC URL")
     .option("--rpc-env <env>", "RPC environment variable name")
     .option("--pool <address>", "Optional pool contract address")
+    .option("--pair <pair>", "Optional pair selector, e.g. WETH/USDC")
+    .option("--fee <fee>", "Optional Uniswap v3 fee tier, e.g. 500")
+    .option("--token0 <address>", "Optional token address for factory.getPool")
+    .option("--token1 <address>", "Optional token address for factory.getPool")
     .option("--json", "Output JSON")
     .action(async (opts: DoctorCommandOptions) => {
       await runDoctorCommand(opts);

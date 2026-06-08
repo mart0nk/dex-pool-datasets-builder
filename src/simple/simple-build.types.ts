@@ -2,7 +2,35 @@ import type { Timeframe } from "../contracts/timeframe.js";
 
 export type SimpleDexBuildInput = {
   chain: string;
-  pool: `0x${string}` | string;
+
+  /**
+   * Direct pool contract address.
+   *
+   * Highest-priority selector. If provided, pair/token factory resolution is skipped.
+   */
+  pool?: `0x${string}` | string;
+
+  /**
+   * User-friendly pair selector.
+   *
+   * Example:
+   * WETH/USDC
+   */
+  pair?: string;
+
+  /**
+   * Uniswap v3 fee tier.
+   *
+   * Examples:
+   * 100, 500, 3000, 10000
+   */
+  fee?: number | string;
+
+  /**
+   * Token address selectors for factory.getPool(token0, token1, fee).
+   */
+  token0?: string;
+  token1?: string;
 
   /**
    * Start date/time.
@@ -60,12 +88,6 @@ export type SimpleDexBuildInput = {
    * Can be token symbol or address.
    */
   quote?: string;
-
-  /**
-   * DEX label.
-   * Defaults from chain preset.
-   */
-  dex?: string;
 
   datasetId?: string;
 

@@ -134,10 +134,6 @@ export async function buildDexPoolDataset(
 
       quality.noTradeIntervals += filledNoTradeIntervals;
 
-      if (filledNoTradeIntervals > 0) {
-        quality.passed = false;
-      }
-
       const candlesByTimeframe: Partial<Record<Timeframe, DexPoolCandle[]>> =
         {};
 
