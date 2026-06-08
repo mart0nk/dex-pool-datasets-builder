@@ -1,0 +1,8 @@
+node_modules/
+dist/
+data/
+
+dex-pool.config.json
+!dex-pool.config.example.json
+
+.env

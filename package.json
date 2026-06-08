@@ -5,12 +5,13 @@
   "type": "module",
   "private": true,
   "bin": {
-    "dex-pool-datasets": "./dist/cli/index.js"
+    "dex-pool-datasets": "./dist/cli/index.js",
+    "dex-pool": "./dist/cli/index.js"
   },
   "exports": {
     ".": {
-      "types": "./src/index.ts",
-      "default": "./src/index.ts"
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
     }
   },
   "scripts": {
@@ -21,7 +22,8 @@
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.0.0",
-    "commander": "^12.0.0"
+    "commander": "^12.0.0",
+    "dotenv": "^16.4.5"
   },
   "devDependencies": {
     "@types/node": "^25.9.2",
