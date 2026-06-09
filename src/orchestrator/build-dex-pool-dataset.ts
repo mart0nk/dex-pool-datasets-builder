@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import type { Timeframe } from "../contracts/timeframe.js";
 import { getTimeframeMs } from "../contracts/timeframe.js";
 import { buildCandlesFromSwaps } from "../candles/pool-candle-builder.js";
@@ -23,12 +24,21 @@ import type {
   DexBuildResult,
   DexBuildRunReport,
 } from "./dex-build-result.types.js";
+import type { DexBuildProgressHandler } from "./dex-build-progress.types.js";
 
 export async function buildDexPoolDataset(
   options: ResolvedDexBuildConfig,
+  hooks: {
+    onProgress?: DexBuildProgressHandler;
+  } = {},
 ): Promise<DexBuildResult> {
   const startedAt = new Date().toISOString();
   const runId = randomUUID();
+
+  hooks.onProgress?.({
+    type: "build_start",
+    datasetId: options.datasetId,
+  });
 
   const registryInput: unknown =
     options.registryPools ??
@@ -84,6 +94,17 @@ export async function buildDexPoolDataset(
     let writtenObjects: WrittenDatasetObject[] = [];
 
     try {
+      hooks.onProgress?.({
+        type: "pool_start",
+        poolId: pool.id,
+        poolAddress: pool.poolAddress,
+      });
+
+      const timestampCachePath =
+        options.cacheDir !== undefined
+          ? join(options.cacheDir, pool.chain, "block-timestamps.jsonl")
+          : undefined;
+
       const { swaps, quality } = await readUniswapV3PoolSwapsWithQuality({
         pool,
         rpcUrl: options.network.rpcUrl,
@@ -91,6 +112,8 @@ export async function buildDexPoolDataset(
         toBlock: options.build.toBlock,
         chunkSize: options.build.chunkSize,
         failFast: options.build.failFast,
+        timestampCachePath,
+        onProgress: hooks.onProgress,
       });
 
       if (swaps.length === 0) {
@@ -108,6 +131,12 @@ export async function buildDexPoolDataset(
 
         continue;
       }
+
+      hooks.onProgress?.({
+        type: "candles_build_start",
+        poolId: pool.id,
+        timeframe: options.build.baseTimeframe,
+      });
 
       const baseCandles = buildCandlesFromSwaps({
         pool,
@@ -134,6 +163,12 @@ export async function buildDexPoolDataset(
 
       quality.noTradeIntervals += filledNoTradeIntervals;
 
+      hooks.onProgress?.({
+        type: "candles_fill_done",
+        poolId: pool.id,
+        filledNoTradeIntervals,
+      });
+
       const candlesByTimeframe: Partial<Record<Timeframe, DexPoolCandle[]>> =
         {};
 
@@ -146,6 +181,13 @@ export async function buildDexPoolDataset(
             timeframe,
           );
         }
+
+        hooks.onProgress?.({
+          type: "timeframe_aggregate_done",
+          poolId: pool.id,
+          timeframe,
+          candles: candlesByTimeframe[timeframe]?.length ?? 0,
+        });
       }
 
       const intervalMs = getTimeframeMs(options.build.baseTimeframe);
@@ -178,6 +220,11 @@ export async function buildDexPoolDataset(
         }
       }
 
+      const finalityConfirmations =
+        options.network.finality?.mode === "confirmation_lag"
+          ? options.network.finality.confirmations
+          : undefined;
+
       const truthManifest: DexPoolDatasetManifest = {
         datasetType: "DEX_POOL",
         sourceMode: "ONCHAIN_POOL_EVENTS",
@@ -186,6 +233,9 @@ export async function buildDexPoolDataset(
         dex: pool.dex,
         poolKind: pool.kind,
         poolAddress: pool.poolAddress,
+
+        poolSelection: options.poolSelectionByPoolId?.[pool.id],
+
         token0: pool.token0,
         token1: pool.token1,
         baseToken: pool.baseToken,
@@ -194,8 +244,13 @@ export async function buildDexPoolDataset(
         blockRange: {
           fromBlock: options.build.fromBlock.toString(),
           toBlock: options.build.toBlock.toString(),
-          finalizedToBlock: options.build.toBlock.toString(),
+          finalizedToBlock: (
+            options.build.finalizedToBlock ?? options.build.toBlock
+          ).toString(),
+          requestedToBlock: options.build.requestedToBlock?.toString(),
+          clippedToFinality: options.build.clippedToFinality,
           finalityMode: "confirmation_lag",
+          confirmations: finalityConfirmations,
         },
 
         timeRange: {
@@ -222,6 +277,11 @@ export async function buildDexPoolDataset(
         generatedAt: new Date().toISOString(),
       };
 
+      hooks.onProgress?.({
+        type: "write_start",
+        poolId: pool.id,
+      });
+
       const exportResult = await exportDexWalkForwardDatasetToStorage({
         truthManifest,
         candlesByTimeframe,
@@ -231,6 +291,12 @@ export async function buildDexPoolDataset(
       });
 
       writtenObjects = exportResult.writtenObjects;
+
+      hooks.onProgress?.({
+        type: "write_done",
+        poolId: pool.id,
+        objects: writtenObjects.length,
+      });
 
       poolResults.push({
         poolId: pool.id,
@@ -283,6 +349,12 @@ export async function buildDexPoolDataset(
     key: `${options.datasetId}/run-report.json`,
     body: `${JSON.stringify(runReport, null, 2)}\n`,
     contentType: "application/json",
+  });
+
+  hooks.onProgress?.({
+    type: "build_done",
+    datasetId: options.datasetId,
+    status,
   });
 
   return {

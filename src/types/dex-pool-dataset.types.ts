@@ -1,8 +1,9 @@
-import type { Timeframe } from '../contracts/timeframe.js';
+import type { Timeframe } from "../contracts/timeframe.js";
+import type { DexPoolSelectionMetadata } from "../simple/pool-selection-metadata.types.js";
 
-export type DexChain = 'ethereum' | 'base' | 'arbitrum' | 'polygon' | 'bsc';
-export type DexPoolKind = 'UNISWAP_V3_STYLE' | 'UNISWAP_V2_STYLE';
-export type DexTokenRef = 'token0' | 'token1';
+export type DexChain = "ethereum" | "base" | "arbitrum" | "polygon" | "bsc";
+export type DexPoolKind = "UNISWAP_V3_STYLE" | "UNISWAP_V2_STYLE";
+export type DexTokenRef = "token0" | "token1";
 
 export type DexPoolToken = {
   symbol: string;
@@ -59,7 +60,7 @@ export type DexPoolCandleQualityFlags = {
 };
 
 export type DexPoolCandleSource = {
-  mode: 'ONCHAIN_POOL_EVENTS';
+  mode: "ONCHAIN_POOL_EVENTS";
   fromBlock?: string;
   toBlock?: string;
   blockHashRange?: string[];
@@ -78,7 +79,7 @@ export type DexPoolSwapRawAudit = {
 };
 
 export type DexPoolCandle = {
-  venueType: 'DEX_POOL';
+  venueType: "DEX_POOL";
   chain: DexChain;
   dex: string;
   poolAddress: `0x${string}`;
@@ -111,39 +112,52 @@ export type DexPoolQualitySummary = {
 };
 
 export type DexPoolDatasetManifest = {
-  datasetType: 'DEX_POOL';
-  sourceMode: 'ONCHAIN_POOL_EVENTS';
+  datasetType: "DEX_POOL";
+  sourceMode: "ONCHAIN_POOL_EVENTS";
   datasetId: string;
+
   chain: DexChain;
   dex: string;
   poolKind: DexPoolKind;
   poolAddress: `0x${string}`;
+
+  poolSelection?: DexPoolSelectionMetadata;
+
   token0: DexPoolToken;
   token1: DexPoolToken;
   baseToken: DexTokenRef;
   quoteToken: DexTokenRef;
+
   blockRange: {
     fromBlock: string;
     toBlock: string;
     finalizedToBlock: string;
-    finalityMode: 'finalized' | 'safe' | 'confirmation_lag';
+    finalityMode: "finalized" | "safe" | "confirmation_lag";
+    confirmations?: number;
+    requestedToBlock?: string;
+    clippedToFinality?: boolean;
   };
+
   timeRange: {
     from: string;
     to: string;
   };
+
   source: {
-    rpcProvider: 'configured_archive_rpc';
-    eventSource: 'eth_getLogs';
+    rpcProvider: "configured_archive_rpc";
+    eventSource: "eth_getLogs";
     events: string[];
   };
+
   timeframes: Timeframe[];
+
   replaySafety: {
     closedCandlesOnly: true;
     availableFromCloseTime: true;
     lookaheadSafe: true;
     intrablockOrderingPreserved: true;
   };
+
   quality: DexPoolQualitySummary;
   generatedAt: string;
 };
