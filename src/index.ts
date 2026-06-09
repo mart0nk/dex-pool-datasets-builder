@@ -29,3 +29,5 @@ export * from "./simple/resolve-date-block-range.js";
 export * from "./simple/evm-contract-reader.js";
 export * from "./simple/resolve-simple-build-config.js";
 export * from "./simple/build-simple-dex-pool-dataset.js";
+
+export * from "./simple/normalize-simple-pool-selections.js";

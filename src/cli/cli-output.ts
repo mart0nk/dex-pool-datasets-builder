@@ -1,9 +1,9 @@
 export function printLine(message: string): void {
-  process.stdout.write(message + '\n');
+  process.stdout.write(message + "\n");
 }
 
 export function printError(message: string): void {
-  process.stderr.write(message + '\n');
+  process.stderr.write(message + "\n");
 }
 
 export function printJson(value: unknown): void {

@@ -6,8 +6,16 @@ import type {
   DexBuildConfig,
   ResolvedDexBuildConfig,
 } from "../../config/dex-build-config.types.js";
+import {
+  parsePairsList,
+  parsePoolsList,
+} from "../../simple/normalize-simple-pool-selections.js";
 import { resolveSimpleDexBuildConfig } from "../../simple/resolve-simple-build-config.js";
-import type { SimpleDexBuildInput } from "../../simple/simple-build.types.js";
+import type {
+  SimpleDexBuildInput,
+  SimplePairSelectionInput,
+  SimplePoolSelectionInput,
+} from "../../simple/simple-build.types.js";
 import { buildDexPoolDataset } from "../../orchestrator/build-dex-pool-dataset.js";
 import type { DexBuildProgressEvent } from "../../orchestrator/dex-build-progress.types.js";
 import type { DexBuildRunReport } from "../../orchestrator/dex-build-result.types.js";
@@ -18,12 +26,14 @@ type BuildCommandOptions = {
   config?: string;
   profile?: string;
   pool?: string;
+  pools?: string;
+  pair?: string;
+  pairs?: string;
   output?: string;
   json?: boolean;
   verbose?: boolean;
 
   chain?: string;
-  pair?: string;
   fee?: string;
   token0?: string;
   token1?: string;
@@ -245,7 +255,8 @@ export async function runBuildCommand(
 
   try {
     const { runReport, status } = await buildDexPoolDataset(resolved, {
-      onProgress: verbose === true ? printProgressEvent : undefined,
+      onProgress:
+        verbose === true && json !== true ? printProgressEvent : undefined,
     });
 
     if (json === true) {
@@ -314,7 +325,9 @@ async function resolveSimpleBuildConfigFromCli(
   return resolveSimpleDexBuildConfig({
     chain: options.chain,
     pool: options.pool,
+    pools: parsePoolsList(options.pools),
     pair: options.pair,
+    pairs: parsePairsList(options.pairs),
     fee: options.fee,
     token0: options.token0,
     token1: options.token1,
@@ -343,15 +356,24 @@ function simpleInputFromConfig(
   }
 
   const rpc = typeof rawConfig.rpc === "string" ? rawConfig.rpc : undefined;
+  const cliPairs = parsePairsList(options.pairs);
+  const cliPools = parsePoolsList(options.pools);
 
   return {
     chain: options.chain ?? requiredString(rawConfig.chain, "chain"),
 
     pool: options.pool ?? optionalString(rawConfig.pool),
+    pools: cliPools ?? parseStringArray(rawConfig.pools),
+
     pair: options.pair ?? optionalString(rawConfig.pair),
+    pairs: cliPairs ?? parsePairsConfig(rawConfig.pairs),
+
     fee: options.fee ?? optionalStringOrNumber(rawConfig.fee),
+
     token0: options.token0 ?? optionalString(rawConfig.token0),
     token1: options.token1 ?? optionalString(rawConfig.token1),
+
+    symbols: parseSymbolsConfig(rawConfig.symbols),
 
     from: options.from ?? requiredString(rawConfig.from, "from"),
     to: options.to ?? optionalString(rawConfig.to),
@@ -400,6 +422,63 @@ function parseTimeframes(value: string | undefined): Timeframe[] | undefined {
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean) as Timeframe[];
+}
+
+function parseStringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  return value.map((item) => String(item)).filter((item) => item.length > 0);
+}
+
+function parsePairsConfig(
+  value: unknown,
+): SimplePairSelectionInput[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  return value.map((item) => {
+    if (typeof item === "string") {
+      return item;
+    }
+
+    if (isRecord(item)) {
+      return {
+        pair: requiredString(item.pair, "pairs[].pair"),
+        fee: optionalStringOrNumber(item.fee),
+        base: optionalString(item.base),
+        quote: optionalString(item.quote),
+      };
+    }
+
+    throw new Error("SIMPLE_CONFIG_PAIR_INVALID");
+  });
+}
+
+function parseSymbolsConfig(
+  value: unknown,
+): SimplePoolSelectionInput[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  return value.map((item) => {
+    if (!isRecord(item)) {
+      throw new Error("SIMPLE_CONFIG_SYMBOL_INVALID");
+    }
+
+    return {
+      pool: optionalString(item.pool),
+      pair: optionalString(item.pair),
+      fee: optionalStringOrNumber(item.fee),
+      token0: optionalString(item.token0),
+      token1: optionalString(item.token1),
+      base: optionalString(item.base),
+      quote: optionalString(item.quote),
+    };
+  });
 }
 
 function isAdvancedDexBuildConfig(value: unknown): value is DexBuildConfig {
@@ -469,7 +548,12 @@ export function registerBuildCommand(program: Command): void {
       "--pool <pool>",
       "Simple mode pool address, or advanced mode pool ID",
     )
+    .option("--pools <list>", "Comma-separated simple mode pool addresses")
     .option("--pair <pair>", "Simple mode pair selector, e.g. WETH/USDC")
+    .option(
+      "--pairs <list>",
+      "Comma-separated pair selectors, e.g. WETH/USDC,cbBTC/WETH:3000",
+    )
     .option("--fee <fee>", "Simple mode Uniswap v3 fee tier, e.g. 500")
     .option(
       "--token0 <address>",

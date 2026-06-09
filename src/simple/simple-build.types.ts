@@ -1,17 +1,13 @@
 import type { Timeframe } from "../contracts/timeframe.js";
 
-export type SimpleDexBuildInput = {
-  chain: string;
-
+export type SimplePoolSelectionInput = {
   /**
    * Direct pool contract address.
-   *
-   * Highest-priority selector. If provided, pair/token factory resolution is skipped.
    */
   pool?: `0x${string}` | string;
 
   /**
-   * User-friendly pair selector.
+   * Pair selector.
    *
    * Example:
    * WETH/USDC
@@ -31,6 +27,46 @@ export type SimpleDexBuildInput = {
    */
   token0?: string;
   token1?: string;
+
+  /**
+   * Optional base/quote selectors.
+   * Can be token symbol or address.
+   */
+  base?: string;
+  quote?: string;
+};
+
+export type SimplePairSelectionInput =
+  | string
+  | {
+      pair: string;
+      fee?: number | string;
+      base?: string;
+      quote?: string;
+    };
+
+export type SimpleDexBuildInput = {
+  chain: string;
+
+  /**
+   * Single-selection mode.
+   *
+   * Kept for backwards compatibility and simple one-off CLI usage.
+   */
+  pool?: `0x${string}` | string;
+  pair?: string;
+  fee?: number | string;
+  token0?: string;
+  token1?: string;
+  base?: string;
+  quote?: string;
+
+  /**
+   * Multi-selection mode.
+   */
+  pools?: Array<`0x${string}` | string>;
+  pairs?: SimplePairSelectionInput[];
+  symbols?: SimplePoolSelectionInput[];
 
   /**
    * Start date/time.
@@ -76,18 +112,6 @@ export type SimpleDexBuildInput = {
    * - s3://bucket/prefix
    */
   out?: string;
-
-  /**
-   * Optional base token selector.
-   * Can be token symbol or address.
-   */
-  base?: string;
-
-  /**
-   * Optional quote token selector.
-   * Can be token symbol or address.
-   */
-  quote?: string;
 
   datasetId?: string;
 

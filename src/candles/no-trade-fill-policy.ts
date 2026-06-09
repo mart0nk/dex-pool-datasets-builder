@@ -1,6 +1,6 @@
-import type { Timeframe } from '../contracts/timeframe.js';
-import { getTimeframeMs } from '../contracts/timeframe.js';
-import type { DexPoolCandle } from '../types/dex-pool-dataset.types.js';
+import type { Timeframe } from "../contracts/timeframe.js";
+import { getTimeframeMs } from "../contracts/timeframe.js";
+import type { DexPoolCandle } from "../types/dex-pool-dataset.types.js";
 
 export type FillNoTradeIntervalsOptions = {
   candles: DexPoolCandle[];
@@ -9,22 +9,34 @@ export type FillNoTradeIntervalsOptions = {
   toTime: number;
 };
 
-export function fillNoTradeIntervals(options: FillNoTradeIntervalsOptions): DexPoolCandle[] {
+export function fillNoTradeIntervals(
+  options: FillNoTradeIntervalsOptions,
+): DexPoolCandle[] {
   const intervalMs = getTimeframeMs(options.timeframe);
   const alignedFrom = alignOpenTime(options.fromTime, intervalMs);
   const alignedTo = alignOpenTime(options.toTime, intervalMs);
-  const byOpenTime = new Map(options.candles.map((candle) => [candle.openTime, candle]));
+  const byOpenTime = new Map(
+    options.candles.map((candle) => [candle.openTime, candle]),
+  );
   const filled: DexPoolCandle[] = [];
   let previous: DexPoolCandle | undefined;
-  const firstCandle = [...options.candles].sort((a, b) => a.openTime - b.openTime)[0];
+  const firstCandle = [...options.candles].sort(
+    (a, b) => a.openTime - b.openTime,
+  )[0];
   if (firstCandle === undefined && alignedFrom <= alignedTo) {
     throw new Error(`DEX_FILL_EMPTY_SOURCE_RANGE:${alignedFrom}:${alignedTo}`);
   }
   if (firstCandle !== undefined && firstCandle.openTime > alignedFrom) {
-    throw new Error(`DEX_FILL_LEADING_INTERVAL_WITHOUT_PRIOR_CANDLE:${alignedFrom}:${firstCandle.openTime}`);
+    throw new Error(
+      `DEX_FILL_LEADING_INTERVAL_WITHOUT_PRIOR_CANDLE:${alignedFrom}:${firstCandle.openTime}`,
+    );
   }
 
-  for (let openTime = alignedFrom; openTime <= alignedTo; openTime += intervalMs) {
+  for (
+    let openTime = alignedFrom;
+    openTime <= alignedTo;
+    openTime += intervalMs
+  ) {
     const existing = byOpenTime.get(openTime);
     if (existing !== undefined) {
       filled.push(existing);
@@ -42,7 +54,11 @@ export function fillNoTradeIntervals(options: FillNoTradeIntervalsOptions): DexP
   return filled;
 }
 
-function buildFillForwardCandle(previous: DexPoolCandle, openTime: number, intervalMs: number): DexPoolCandle {
+function buildFillForwardCandle(
+  previous: DexPoolCandle,
+  openTime: number,
+  intervalMs: number,
+): DexPoolCandle {
   return {
     ...previous,
     openTime,
@@ -62,11 +78,15 @@ function buildFillForwardCandle(previous: DexPoolCandle, openTime: number, inter
   };
 }
 
-function buildFillSource(previous: DexPoolCandle): DexPoolCandle['source'] {
+function buildFillSource(previous: DexPoolCandle): DexPoolCandle["source"] {
   return {
-    mode: 'ONCHAIN_POOL_EVENTS',
-    ...(previous.source.toBlock !== undefined ? { fromBlock: previous.source.toBlock, toBlock: previous.source.toBlock } : {}),
-    ...(previous.source.blockHashRange !== undefined ? { blockHashRange: previous.source.blockHashRange } : {}),
+    mode: "ONCHAIN_POOL_EVENTS",
+    ...(previous.source.toBlock !== undefined
+      ? { fromBlock: previous.source.toBlock, toBlock: previous.source.toBlock }
+      : {}),
+    ...(previous.source.blockHashRange !== undefined
+      ? { blockHashRange: previous.source.blockHashRange }
+      : {}),
   };
 }
 

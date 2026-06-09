@@ -1,10 +1,15 @@
 import type { Timeframe } from "../contracts/timeframe.js";
 import { ALL_TIMEFRAMES } from "../contracts/timeframe.js";
 import type { ResolvedDexBuildConfig } from "../config/dex-build-config.types.js";
-import type { DexChain } from "../types/dex-pool-dataset.types.js";
+import type {
+  DexChain,
+  DexPoolConfig,
+} from "../types/dex-pool-dataset.types.js";
+import type { DexPoolSelectionMetadata } from "./pool-selection-metadata.types.js";
 import { createEvmJsonRpcClient } from "../evm/evm-json-rpc-client.js";
 import { getSimpleChainPreset } from "./chain-presets.js";
 import { readUniswapV3PoolConfig } from "./evm-contract-reader.js";
+import { normalizeSimplePoolSelections } from "./normalize-simple-pool-selections.js";
 import { resolveDateBlockRange } from "./resolve-date-block-range.js";
 import { resolvePoolSelection } from "./resolve-pool-selection.js";
 import type { SimpleDexBuildInput } from "./simple-build.types.js";
@@ -12,6 +17,7 @@ import type { SimpleDexBuildInput } from "./simple-build.types.js";
 const DEFAULT_BASE_TIMEFRAME: Timeframe = "1m";
 const DEFAULT_TIMEFRAMES: Timeframe[] = ["1m", "5m", "15m", "1h", "4h"];
 const DEFAULT_OUTPUT = "./data/dex-pool-datasets";
+const DEFAULT_CACHE_DIR = ".data/cache";
 
 export async function resolveSimpleDexBuildConfig(
   input: SimpleDexBuildInput,
@@ -43,26 +49,47 @@ export async function resolveSimpleDexBuildConfig(
     to,
   });
 
-  const poolSelection = await resolvePoolSelection({
-    client,
-    chain: preset.chain,
-    pool: input.pool,
-    pair: input.pair,
-    fee: input.fee,
-    token0: input.token0,
-    token1: input.token1,
-    base: input.base,
-    quote: input.quote,
+  const finality = applyFinality({
+    toBlock: blockRange.toBlock,
+    latestBlock: blockRange.latestBlock,
+    confirmations: preset.finalityConfirmations,
   });
 
-  const pool = await readUniswapV3PoolConfig({
-    client,
-    chain: preset.chain,
-    poolAddress: poolSelection.poolAddress,
-    startBlock: blockRange.fromBlock.toString(),
-    base: poolSelection.base ?? input.base,
-    quote: poolSelection.quote ?? input.quote,
-  });
+  const selections = normalizeSimplePoolSelections(input);
+  const poolById = new Map<string, DexPoolConfig>();
+  const poolSelectionByPoolId: Record<string, DexPoolSelectionMetadata> = {};
+
+  for (const selection of selections) {
+    const poolSelection = await resolvePoolSelection({
+      client,
+      chain: preset.chain,
+      pool: selection.pool,
+      pair: selection.pair,
+      fee: selection.fee,
+      token0: selection.token0,
+      token1: selection.token1,
+      base: selection.base,
+      quote: selection.quote,
+    });
+
+    const pool = await readUniswapV3PoolConfig({
+      client,
+      chain: preset.chain,
+      poolAddress: poolSelection.poolAddress,
+      startBlock: blockRange.fromBlock.toString(),
+      base: poolSelection.base ?? selection.base,
+      quote: poolSelection.quote ?? selection.quote,
+    });
+
+    poolById.set(pool.id, pool);
+    poolSelectionByPoolId[pool.id] = poolSelection.metadata;
+  }
+
+  const pools = [...poolById.values()];
+
+  if (pools.length === 0) {
+    throw new Error("SIMPLE_NO_POOLS_RESOLVED");
+  }
 
   const timeframes = normalizeTimeframes(
     input.timeframes ?? DEFAULT_TIMEFRAMES,
@@ -81,7 +108,7 @@ export async function resolveSimpleDexBuildConfig(
     input.datasetId ??
     buildSimpleDatasetId({
       chain: preset.chain,
-      poolId: pool.id,
+      pools,
       from,
       to,
     });
@@ -89,7 +116,8 @@ export async function resolveSimpleDexBuildConfig(
   return {
     datasetId,
     registryPath: "<runtime:simple>",
-    registryPools: [pool],
+    registryPools: pools,
+    poolSelectionByPoolId,
 
     network: {
       chain: preset.chain,
@@ -102,9 +130,12 @@ export async function resolveSimpleDexBuildConfig(
     },
 
     build: {
-      pools: [pool.id],
+      pools: pools.map((pool) => pool.id),
       fromBlock: blockRange.fromBlock,
-      toBlock: blockRange.toBlock,
+      toBlock: finality.toBlock,
+      requestedToBlock: finality.requestedToBlock,
+      finalizedToBlock: finality.finalizedToBlock,
+      clippedToFinality: finality.clippedToFinality,
       baseTimeframe,
       timeframes,
       chunkSize: normalizeChunkSize(input.chunkSize ?? "5000"),
@@ -117,6 +148,7 @@ export async function resolveSimpleDexBuildConfig(
     },
 
     profile: "simple",
+    cacheDir: DEFAULT_CACHE_DIR,
   };
 }
 
@@ -138,6 +170,32 @@ export function resolveSimpleRpcUrl(input: {
   }
 
   return rpcUrl;
+}
+
+function applyFinality(input: {
+  toBlock: bigint;
+  latestBlock: bigint;
+  confirmations: number;
+}): {
+  toBlock: bigint;
+  requestedToBlock: bigint;
+  finalizedToBlock: bigint;
+  clippedToFinality: boolean;
+} {
+  const safeToBlock =
+    input.latestBlock > BigInt(input.confirmations)
+      ? input.latestBlock - BigInt(input.confirmations)
+      : 0n;
+
+  const effectiveToBlock =
+    input.toBlock > safeToBlock ? safeToBlock : input.toBlock;
+
+  return {
+    toBlock: effectiveToBlock,
+    requestedToBlock: input.toBlock,
+    finalizedToBlock: safeToBlock,
+    clippedToFinality: effectiveToBlock !== input.toBlock,
+  };
 }
 
 function deriveToDate(from: string, days: number | undefined): string {
@@ -196,12 +254,16 @@ function normalizeOutputUri(value: string): string {
 
 function buildSimpleDatasetId(input: {
   chain: DexChain;
-  poolId: string;
+  pools: DexPoolConfig[];
   from: string;
   to: string;
 }): string {
   const fromPart = input.from.slice(0, 10).replace(/[^0-9]/g, "");
   const toPart = input.to.slice(0, 10).replace(/[^0-9]/g, "");
 
-  return `${input.poolId}-${fromPart}-${toPart}`;
+  if (input.pools.length === 1) {
+    return `${input.pools[0]!.id}-${fromPart}-${toPart}`;
+  }
+
+  return `${input.chain}-dex-pools-${fromPart}-${toPart}`;
 }

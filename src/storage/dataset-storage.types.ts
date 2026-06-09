@@ -1,4 +1,4 @@
-export type DatasetStorageKind = 'local' | 's3';
+export type DatasetStorageKind = "local" | "s3";
 
 export type WriteDatasetObjectInput = {
   key: string;

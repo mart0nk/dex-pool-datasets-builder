@@ -1,14 +1,17 @@
-import { createHash } from 'node:crypto';
-import type { Timeframe } from '../contracts/timeframe.js';
-import { getTimeframeMs } from '../contracts/timeframe.js';
-import type { DatasetManifest } from '../contracts/replay-dataset.types.js';
-import type { DatasetStorage, WrittenDatasetObject } from '../storage/dataset-storage.types.js';
+import { createHash } from "node:crypto";
+import type { Timeframe } from "../contracts/timeframe.js";
+import { getTimeframeMs } from "../contracts/timeframe.js";
+import type { DatasetManifest } from "../contracts/replay-dataset.types.js";
+import type {
+  DatasetStorage,
+  WrittenDatasetObject,
+} from "../storage/dataset-storage.types.js";
 import type {
   DexPoolCandle,
   DexPoolDatasetManifest,
   DexPoolReplayQualityRecord,
-} from '../types/dex-pool-dataset.types.js';
-import { toHistoricalKline } from './walk-forward-export-adapter.js';
+} from "../types/dex-pool-dataset.types.js";
+import { toHistoricalKline } from "./walk-forward-export-adapter.js";
 
 export type ExportDexWalkForwardToStorageOptions = {
   truthManifest: DexPoolDatasetManifest;
@@ -25,7 +28,7 @@ export type ExportDexWalkForwardToStorageResult = {
 };
 
 export async function exportDexWalkForwardDatasetToStorage(
-  options: ExportDexWalkForwardToStorageOptions
+  options: ExportDexWalkForwardToStorageOptions,
 ): Promise<ExportDexWalkForwardToStorageResult> {
   const { truthManifest, candlesByTimeframe, storage, rootKey } = options;
   const writtenObjects: WrittenDatasetObject[] = [];
@@ -59,10 +62,10 @@ export async function exportDexWalkForwardDatasetToStorage(
     const written = await storage.writeObject({
       key,
       body: jsonlBody,
-      contentType: 'application/x-ndjson',
+      contentType: "application/x-ndjson",
     });
     writtenObjects.push(written);
-    checksumEntries.push({ key, body: Buffer.from(jsonlBody, 'utf8') });
+    checksumEntries.push({ key, body: Buffer.from(jsonlBody, "utf8") });
 
     for (const candle of candles) {
       if (Object.keys(candle.qualityFlags).length === 0) continue;
@@ -84,10 +87,13 @@ export async function exportDexWalkForwardDatasetToStorage(
   const writtenQuality = await storage.writeObject({
     key: qualityKey,
     body: qualityBody,
-    contentType: 'application/x-ndjson',
+    contentType: "application/x-ndjson",
   });
   writtenObjects.push(writtenQuality);
-  checksumEntries.push({ key: qualityKey, body: Buffer.from(qualityBody, 'utf8') });
+  checksumEntries.push({
+    key: qualityKey,
+    body: Buffer.from(qualityBody, "utf8"),
+  });
 
   const generatedAt = (options.now ?? new Date()).toISOString();
   const checksum = checksumFromEntries(checksumEntries, rootKey);
@@ -96,11 +102,11 @@ export async function exportDexWalkForwardDatasetToStorage(
 
   const manifest: DatasetManifest = {
     schemaVersion: 2,
-    datasetType: 'DEX_POOL',
-    replayFormat: 'HISTORICAL_KLINE_COMPATIBLE',
+    datasetType: "DEX_POOL",
+    replayFormat: "HISTORICAL_KLINE_COMPATIBLE",
     datasetId: truthManifest.datasetId,
-    source: 'DEX_POOL',
-    datasetVersion: 'dex-pool-replay-v1',
+    source: "DEX_POOL",
+    datasetVersion: "dex-pool-replay-v1",
     period: truthManifest.timeRange,
     startTime: new Date(firstOpenTime).toISOString(),
     endTime: new Date(lastCloseTime).toISOString(),
@@ -108,35 +114,37 @@ export async function exportDexWalkForwardDatasetToStorage(
     replaySymbols: symbols,
     timeframes: timeframesBySymbol,
     contextSymbols: {},
-    tradableSymbols: Object.fromEntries(symbols.map((symbol) => [
-      symbol,
-      {
-        role: 'TRADABLE',
-        timeframes: timeframesBySymbol[symbol] ?? [],
-        relativeStrengthMode: 'SELF_BENCHMARK',
-      },
-    ])),
-    timezone: 'UTC',
-    timestampConvention: 'UTC_EPOCH_MS_OPEN_TIME_WITH_INCLUSIVE_CLOSE_TIME',
+    tradableSymbols: Object.fromEntries(
+      symbols.map((symbol) => [
+        symbol,
+        {
+          role: "TRADABLE",
+          timeframes: timeframesBySymbol[symbol] ?? [],
+          relativeStrengthMode: "SELF_BENCHMARK",
+        },
+      ]),
+    ),
+    timezone: "UTC",
+    timestampConvention: "UTC_EPOCH_MS_OPEN_TIME_WITH_INCLUSIVE_CLOSE_TIME",
     createdAt: generatedAt,
     generatedAt,
     checksum,
     sourceDetails: {
-      provider: 'dex_pool',
-      endpoint: 'eth_getLogs',
-      timezone: 'UTC',
+      provider: "dex_pool",
+      endpoint: "eth_getLogs",
+      timezone: "UTC",
     },
     sourceDataset: {
       datasetId: truthManifest.datasetId,
-      sourceMode: 'ONCHAIN_POOL_EVENTS',
+      sourceMode: "ONCHAIN_POOL_EVENTS",
       chain: truthManifest.chain,
       dex: truthManifest.dex,
       poolAddress: truthManifest.poolAddress,
     },
     adapterPolicy: {
-      symbolPolicy: 'BASE_QUOTE_SYMBOL',
-      noTradeIntervalPolicy: 'FILL_FORWARD_ZERO_VOLUME',
-      availableFromPolicy: 'CANDLE_CLOSE_TIME',
+      symbolPolicy: "BASE_QUOTE_SYMBOL",
+      noTradeIntervalPolicy: "FILL_FORWARD_ZERO_VOLUME",
+      availableFromPolicy: "CANDLE_CLOSE_TIME",
       preserveDexMetadataInSidecar: true,
     },
   };
@@ -146,7 +154,7 @@ export async function exportDexWalkForwardDatasetToStorage(
   const writtenManifest = await storage.writeObject({
     key: manifestKey,
     body: manifestBody,
-    contentType: 'application/json',
+    contentType: "application/json",
   });
   writtenObjects.push(writtenManifest);
 
@@ -154,14 +162,17 @@ export async function exportDexWalkForwardDatasetToStorage(
 }
 
 function buildJsonlBody(rows: unknown[]): string {
-  return rows.map((row) => JSON.stringify(row)).join('\n') + (rows.length > 0 ? '\n' : '');
+  return (
+    rows.map((row) => JSON.stringify(row)).join("\n") +
+    (rows.length > 0 ? "\n" : "")
+  );
 }
 
 function checksumFromEntries(
   entries: Array<{ key: string; body: Buffer }>,
-  rootKey: string
+  rootKey: string,
 ): string {
-  const hash = createHash('sha256');
+  const hash = createHash("sha256");
   // Sort by relative key, matching the existing adapter's path.sort() behavior
   const sorted = [...entries].sort((a, b) => {
     const relA = relativeKey(a.key, rootKey);
@@ -170,41 +181,57 @@ function checksumFromEntries(
   });
   for (const entry of sorted) {
     hash.update(relativeKey(entry.key, rootKey));
-    hash.update('\0');
+    hash.update("\0");
     hash.update(entry.body);
-    hash.update('\n');
+    hash.update("\n");
   }
-  return hash.digest('hex');
+  return hash.digest("hex");
 }
 
 function relativeKey(key: string, rootKey: string): string {
-  const prefix = rootKey.endsWith('/') ? rootKey : `${rootKey}/`;
+  const prefix = rootKey.endsWith("/") ? rootKey : `${rootKey}/`;
   if (key.startsWith(prefix)) {
     return key.slice(prefix.length);
   }
   return key;
 }
 
-function validateReplayContinuity(candles: DexPoolCandle[], timeframe: Timeframe): void {
+function validateReplayContinuity(
+  candles: DexPoolCandle[],
+  timeframe: Timeframe,
+): void {
   const intervalMs = getTimeframeMs(timeframe);
 
   let previousOpenTime = Number.NEGATIVE_INFINITY;
   for (const candle of candles) {
     assertFiniteCandleNumbers(candle, timeframe);
     if (candle.timeframe !== timeframe) {
-      throw new Error(`DEX_REPLAY_TIMEFRAME_MISMATCH:${candle.symbol}:${timeframe}:${candle.timeframe}`);
+      throw new Error(
+        `DEX_REPLAY_TIMEFRAME_MISMATCH:${candle.symbol}:${timeframe}:${candle.timeframe}`,
+      );
     }
     if (candle.closeTime !== candle.openTime + intervalMs - 1) {
-      throw new Error(`DEX_REPLAY_INVALID_INTERVAL:${candle.symbol}:${timeframe}:${candle.openTime}:${candle.closeTime}`);
+      throw new Error(
+        `DEX_REPLAY_INVALID_INTERVAL:${candle.symbol}:${timeframe}:${candle.openTime}:${candle.closeTime}`,
+      );
     }
     if (candle.openTime % intervalMs !== 0) {
-      throw new Error(`DEX_REPLAY_TIME_MISALIGNED:${candle.symbol}:${timeframe}:${candle.openTime}`);
+      throw new Error(
+        `DEX_REPLAY_TIME_MISALIGNED:${candle.symbol}:${timeframe}:${candle.openTime}`,
+      );
     }
     if (candle.openTime <= previousOpenTime) {
-      throw new Error(`DEX_REPLAY_UNSORTED:${candle.symbol}:${timeframe}:${candle.openTime}`);
+      throw new Error(
+        `DEX_REPLAY_UNSORTED:${candle.symbol}:${timeframe}:${candle.openTime}`,
+      );
     }
-    if (Number.isFinite(previousOpenTime) && candle.openTime - previousOpenTime !== intervalMs) {
-      throw new Error(`DEX_REPLAY_GAP:${candle.symbol}:${timeframe}:${previousOpenTime}:${candle.openTime}`);
+    if (
+      Number.isFinite(previousOpenTime) &&
+      candle.openTime - previousOpenTime !== intervalMs
+    ) {
+      throw new Error(
+        `DEX_REPLAY_GAP:${candle.symbol}:${timeframe}:${previousOpenTime}:${candle.openTime}`,
+      );
     }
     if (
       candle.open <= 0 ||
@@ -213,16 +240,27 @@ function validateReplayContinuity(candles: DexPoolCandle[], timeframe: Timeframe
       candle.high < candle.low ||
       candle.low <= 0
     ) {
-      throw new Error(`DEX_REPLAY_INVALID_OHLC:${candle.symbol}:${timeframe}:${candle.openTime}`);
+      throw new Error(
+        `DEX_REPLAY_INVALID_OHLC:${candle.symbol}:${timeframe}:${candle.openTime}`,
+      );
     }
-    if (candle.volumeBase < 0 || candle.volumeQuote < 0 || candle.tradeCount < 0) {
-      throw new Error(`DEX_REPLAY_INVALID_VOLUME:${candle.symbol}:${timeframe}:${candle.openTime}`);
+    if (
+      candle.volumeBase < 0 ||
+      candle.volumeQuote < 0 ||
+      candle.tradeCount < 0
+    ) {
+      throw new Error(
+        `DEX_REPLAY_INVALID_VOLUME:${candle.symbol}:${timeframe}:${candle.openTime}`,
+      );
     }
     previousOpenTime = candle.openTime;
   }
 }
 
-function assertFiniteCandleNumbers(candle: DexPoolCandle, timeframe: Timeframe): void {
+function assertFiniteCandleNumbers(
+  candle: DexPoolCandle,
+  timeframe: Timeframe,
+): void {
   const values = [
     candle.openTime,
     candle.closeTime,
@@ -235,14 +273,22 @@ function assertFiniteCandleNumbers(candle: DexPoolCandle, timeframe: Timeframe):
     candle.tradeCount,
   ];
   if (!values.every(Number.isFinite)) {
-    throw new Error(`DEX_REPLAY_INVALID_NUMBER:${candle.symbol}:${timeframe}:${candle.openTime}`);
+    throw new Error(
+      `DEX_REPLAY_INVALID_NUMBER:${candle.symbol}:${timeframe}:${candle.openTime}`,
+    );
   }
 }
 
-function validateSingleReplaySymbol(candles: DexPoolCandle[], timeframe: Timeframe, expectedSymbol: string): void {
+function validateSingleReplaySymbol(
+  candles: DexPoolCandle[],
+  timeframe: Timeframe,
+  expectedSymbol: string,
+): void {
   for (const candle of candles) {
     if (candle.symbol !== expectedSymbol) {
-      throw new Error(`DEX_REPLAY_MIXED_SYMBOLS:${timeframe}:${expectedSymbol}:${candle.symbol}:${candle.openTime}`);
+      throw new Error(
+        `DEX_REPLAY_MIXED_SYMBOLS:${timeframe}:${expectedSymbol}:${candle.symbol}:${candle.openTime}`,
+      );
     }
   }
 }
@@ -250,17 +296,21 @@ function validateSingleReplaySymbol(candles: DexPoolCandle[], timeframe: Timefra
 function assertTimeRangeMatchesCandles(
   manifest: DexPoolDatasetManifest,
   firstOpenTime: number,
-  lastCloseTime: number
+  lastCloseTime: number,
 ): void {
   const manifestFrom = Date.parse(manifest.timeRange.from);
   const manifestTo = Date.parse(manifest.timeRange.to);
   if (!Number.isFinite(manifestFrom) || !Number.isFinite(manifestTo)) {
-    throw new Error('DEX_REPLAY_MANIFEST_TIME_RANGE_INVALID');
+    throw new Error("DEX_REPLAY_MANIFEST_TIME_RANGE_INVALID");
   }
   if (manifestFrom !== firstOpenTime) {
-    throw new Error(`DEX_REPLAY_PERIOD_FROM_MISMATCH:${manifestFrom}:${firstOpenTime}`);
+    throw new Error(
+      `DEX_REPLAY_PERIOD_FROM_MISMATCH:${manifestFrom}:${firstOpenTime}`,
+    );
   }
   if (manifestTo !== lastCloseTime) {
-    throw new Error(`DEX_REPLAY_PERIOD_TO_MISMATCH:${manifestTo}:${lastCloseTime}`);
+    throw new Error(
+      `DEX_REPLAY_PERIOD_TO_MISMATCH:${manifestTo}:${lastCloseTime}`,
+    );
   }
 }

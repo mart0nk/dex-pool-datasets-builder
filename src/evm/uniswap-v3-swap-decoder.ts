@@ -1,9 +1,12 @@
-import type { DexPoolConfig, NormalizedPoolSwap } from '../types/dex-pool-dataset.types.js';
-import type { EvmLog, HexString } from './evm-json-rpc-client.js';
-import { hexToBigInt, hexToNumber } from './evm-json-rpc-client.js';
+import type {
+  DexPoolConfig,
+  NormalizedPoolSwap,
+} from "../types/dex-pool-dataset.types.js";
+import type { EvmLog, HexString } from "./evm-json-rpc-client.js";
+import { hexToBigInt, hexToNumber } from "./evm-json-rpc-client.js";
 
 export const UNISWAP_V3_SWAP_TOPIC =
-  '0xc42079f94a6350d7e6235f29174924f928cc2ac818eb64fed8004e115fbcca67' as const;
+  "0xc42079f94a6350d7e6235f29174924f928cc2ac818eb64fed8004e115fbcca67" as const;
 
 const WORD_HEX_LENGTH = 64;
 const SWAP_TOPIC_COUNT = 3;
@@ -19,19 +22,31 @@ export function decodeUniswapV3SwapLog(input: {
   log: EvmLog;
   blockTimestamp: number;
 }): NormalizedPoolSwap {
-  if (input.pool.kind !== 'UNISWAP_V3_STYLE') {
+  if (input.pool.kind !== "UNISWAP_V3_STYLE") {
     throw new Error(`UNSUPPORTED_POOL_KIND_FOR_V3_DECODER:${input.pool.kind}`);
   }
-  if (input.log.address.toLowerCase() !== input.pool.poolAddress.toLowerCase()) {
-    throw new Error(`UNISWAP_V3_SWAP_ADDRESS_MISMATCH:${input.pool.poolAddress}:${input.log.address}:${input.log.transactionHash}:${input.log.logIndex}`);
+  if (
+    input.log.address.toLowerCase() !== input.pool.poolAddress.toLowerCase()
+  ) {
+    throw new Error(
+      `UNISWAP_V3_SWAP_ADDRESS_MISMATCH:${input.pool.poolAddress}:${input.log.address}:${input.log.transactionHash}:${input.log.logIndex}`,
+    );
   }
   if (input.log.topics.length !== SWAP_TOPIC_COUNT) {
-    throw new Error(`UNISWAP_V3_SWAP_TOPIC_COUNT_INVALID:${input.log.transactionHash}:${input.log.logIndex}:${input.log.topics.length}`);
+    throw new Error(
+      `UNISWAP_V3_SWAP_TOPIC_COUNT_INVALID:${input.log.transactionHash}:${input.log.logIndex}:${input.log.topics.length}`,
+    );
   }
   if (input.log.topics[0]?.toLowerCase() !== UNISWAP_V3_SWAP_TOPIC) {
-    throw new Error(`UNISWAP_V3_SWAP_TOPIC_MISMATCH:${input.log.transactionHash}:${input.log.logIndex}`);
+    throw new Error(
+      `UNISWAP_V3_SWAP_TOPIC_MISMATCH:${input.log.transactionHash}:${input.log.logIndex}`,
+    );
   }
-  assertSwapDataShape(input.log.data, input.log.transactionHash, input.log.logIndex);
+  assertSwapDataShape(
+    input.log.data,
+    input.log.transactionHash,
+    input.log.logIndex,
+  );
 
   const amount0Raw = decodeSignedWord(input.log.data, 0);
   const amount1Raw = decodeSignedWord(input.log.data, 1);
@@ -45,7 +60,9 @@ export function decodeUniswapV3SwapLog(input: {
   });
 
   if (!Number.isFinite(priceToken1PerToken0) || priceToken1PerToken0 <= 0) {
-    throw new Error(`UNISWAP_V3_INVALID_PRICE:${input.log.transactionHash}:${input.log.logIndex}`);
+    throw new Error(
+      `UNISWAP_V3_INVALID_PRICE:${input.log.transactionHash}:${input.log.logIndex}`,
+    );
   }
 
   return {
@@ -80,9 +97,10 @@ export function sqrtPriceX96ToAdjustedPrice(input: {
 }): number {
   const numerator = input.sqrtPriceX96 * input.sqrtPriceX96;
   const decimalDelta = input.token0Decimals - input.token1Decimals;
-  const scaled = decimalDelta >= 0
-    ? (numerator * PRICE_SCALE * pow10(decimalDelta)) / Q192
-    : (numerator * PRICE_SCALE) / (Q192 * pow10(-decimalDelta));
+  const scaled =
+    decimalDelta >= 0
+      ? (numerator * PRICE_SCALE * pow10(decimalDelta)) / Q192
+      : (numerator * PRICE_SCALE) / (Q192 * pow10(-decimalDelta));
   return Number(scaled) / Number(PRICE_SCALE);
 }
 
@@ -107,7 +125,7 @@ function decodeSignedWord(data: HexString, wordIndex: number): bigint {
 }
 
 function readWord(data: HexString, wordIndex: number): string {
-  const hex = data.startsWith('0x') ? data.slice(2) : data;
+  const hex = data.startsWith("0x") ? data.slice(2) : data;
   const start = wordIndex * WORD_HEX_LENGTH;
   const end = start + WORD_HEX_LENGTH;
   const word = hex.slice(start, end);
@@ -117,13 +135,21 @@ function readWord(data: HexString, wordIndex: number): string {
   return word;
 }
 
-function assertSwapDataShape(data: HexString, transactionHash: string, logIndex: HexString): void {
-  const hex = data.startsWith('0x') ? data.slice(2) : data;
+function assertSwapDataShape(
+  data: HexString,
+  transactionHash: string,
+  logIndex: HexString,
+): void {
+  const hex = data.startsWith("0x") ? data.slice(2) : data;
   if (!ABI_HEX_PATTERN.test(hex)) {
-    throw new Error(`UNISWAP_V3_SWAP_DATA_INVALID_HEX:${transactionHash}:${logIndex}`);
+    throw new Error(
+      `UNISWAP_V3_SWAP_DATA_INVALID_HEX:${transactionHash}:${logIndex}`,
+    );
   }
   const expectedLength = SWAP_DATA_WORDS * WORD_HEX_LENGTH;
   if (hex.length !== expectedLength) {
-    throw new Error(`UNISWAP_V3_SWAP_DATA_LENGTH_INVALID:${transactionHash}:${logIndex}:${hex.length}`);
+    throw new Error(
+      `UNISWAP_V3_SWAP_DATA_LENGTH_INVALID:${transactionHash}:${logIndex}:${hex.length}`,
+    );
   }
 }
