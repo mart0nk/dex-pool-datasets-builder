@@ -1,4 +1,4 @@
-import type { ResolvedDexBuildConfig } from '../config/dex-build-config.types.js';
+import type { ResolvedDexBuildConfig } from "../config/dex-build-config.types.js";
 
 export type DexBuildPlan = {
   datasetId: string;
@@ -15,7 +15,9 @@ export type DexBuildPlan = {
   }>;
 };
 
-export function planDexPoolDataset(config: ResolvedDexBuildConfig): DexBuildPlan {
+export function planDexPoolDataset(
+  config: ResolvedDexBuildConfig,
+): DexBuildPlan {
   return {
     datasetId: config.datasetId,
     profile: config.profile,

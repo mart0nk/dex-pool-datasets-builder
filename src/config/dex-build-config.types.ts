@@ -51,11 +51,18 @@ export type ResolvedDexBuildConfig = {
 
   /**
    * Runtime registry entries used by simple mode.
-   *
-   * Advanced mode reads registry JSON from registryPath.
-   * Simple mode injects generated pool configs here, so no registry file is needed.
    */
   registryPools?: DexPoolConfig[];
+
+  /**
+   * Audit metadata for how each pool was selected.
+   *
+   * Keyed by pool.id.
+   */
+  poolSelectionByPoolId?: Record<
+    string,
+    import("../simple/pool-selection-metadata.types.js").DexPoolSelectionMetadata
+  >;
 
   network: {
     chain: string;
@@ -68,6 +75,22 @@ export type ResolvedDexBuildConfig = {
     pools: string[];
     fromBlock: bigint;
     toBlock: bigint;
+
+    /**
+     * Original requested toBlock before finality clipping.
+     */
+    requestedToBlock?: bigint;
+
+    /**
+     * Finalized/safe effective toBlock.
+     */
+    finalizedToBlock?: bigint;
+
+    /**
+     * Whether toBlock was clipped by finality logic.
+     */
+    clippedToFinality?: boolean;
+
     baseTimeframe: Timeframe;
     timeframes: Timeframe[];
     chunkSize: bigint;
@@ -76,4 +99,12 @@ export type ResolvedDexBuildConfig = {
 
   output: DexBuildOutputConfig;
   profile?: string;
+
+  /**
+   * Persistent local cache directory.
+   *
+   * Example:
+   * .data/cache
+   */
+  cacheDir?: string;
 };

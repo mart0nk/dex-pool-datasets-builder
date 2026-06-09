@@ -1,5 +1,5 @@
 {
-  "name": "@trader-agent/dex-pool-datasets",
+  "name": "dex-pool-datasets",
   "version": "0.1.0",
   "description": "DEX pool dataset builder and replay export adapter",
   "type": "module",
@@ -17,6 +17,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "cli": "tsx src/cli/index.ts",
+    "dex-pool": "node dist/cli/index.js",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run tests"
   },

@@ -1,6 +1,6 @@
-import type { Timeframe } from '../contracts/timeframe.js';
-import type { DexPoolQualitySummary } from '../types/dex-pool-dataset.types.js';
-import type { WrittenDatasetObject } from '../storage/dataset-storage.types.js';
+import type { Timeframe } from "../contracts/timeframe.js";
+import type { DexPoolQualitySummary } from "../types/dex-pool-dataset.types.js";
+import type { WrittenDatasetObject } from "../storage/dataset-storage.types.js";
 
 export type DexBuildRunReport = {
   schemaVersion: 1;
@@ -8,7 +8,7 @@ export type DexBuildRunReport = {
   runId: string;
   startedAt: string;
   finishedAt: string;
-  status: 'completed' | 'failed';
+  status: "completed" | "failed";
   config: {
     profile?: string;
     registryPath: string;
@@ -35,5 +35,5 @@ export type DexBuildRunReport = {
 
 export type DexBuildResult = {
   runReport: DexBuildRunReport;
-  status: 'completed' | 'failed';
+  status: "completed" | "failed";
 };

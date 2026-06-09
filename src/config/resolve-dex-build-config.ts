@@ -1,4 +1,7 @@
-import type { DexBuildConfig, ResolvedDexBuildConfig } from './dex-build-config.types.js';
+import type {
+  DexBuildConfig,
+  ResolvedDexBuildConfig,
+} from "./dex-build-config.types.js";
 
 export type ResolveDexBuildConfigOptions = {
   config: DexBuildConfig;
@@ -6,7 +9,9 @@ export type ResolveDexBuildConfigOptions = {
   outputOverride?: string;
 };
 
-export function resolveDexBuildConfig(options: ResolveDexBuildConfigOptions): ResolvedDexBuildConfig {
+export function resolveDexBuildConfig(
+  options: ResolveDexBuildConfigOptions,
+): ResolvedDexBuildConfig {
   const { config, profile, outputOverride } = options;
 
   // Merge profile if specified
@@ -31,7 +36,7 @@ export function resolveDexBuildConfig(options: ResolveDexBuildConfigOptions): Re
     mergedOutput = {
       ...mergedOutput,
       uri: outputOverride,
-      type: outputOverride.startsWith('s3://') ? 's3' : 'local',
+      type: outputOverride.startsWith("s3://") ? "s3" : "local",
     };
   }
 
@@ -56,7 +61,7 @@ export function resolveDexBuildConfig(options: ResolveDexBuildConfigOptions): Re
       toBlock: BigInt(mergedBuild.toBlock),
       baseTimeframe: mergedBuild.baseTimeframe,
       timeframes: mergedBuild.timeframes,
-      chunkSize: BigInt(mergedBuild.chunkSize ?? '5000'),
+      chunkSize: BigInt(mergedBuild.chunkSize ?? "5000"),
       failFast: mergedBuild.failFast ?? true,
     },
     output: mergedOutput,

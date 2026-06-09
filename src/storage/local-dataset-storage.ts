@@ -1,25 +1,33 @@
-import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
-import type { DatasetStorage, DatasetStorageKind, WriteDatasetObjectInput, WrittenDatasetObject } from './dataset-storage.types.js';
+import { access, mkdir, readFile, writeFile } from "node:fs/promises";
+import { join, resolve } from "node:path";
+import type {
+  DatasetStorage,
+  DatasetStorageKind,
+  WriteDatasetObjectInput,
+  WrittenDatasetObject,
+} from "./dataset-storage.types.js";
 
 export function parseLocalUri(uri: string): string {
-  if (!uri.startsWith('local://')) {
+  if (!uri.startsWith("local://")) {
     throw new Error(`LOCAL_URI_INVALID:${uri}`);
   }
-  return uri.slice('local://'.length);
+  return uri.slice("local://".length);
 }
 
 export class LocalDatasetStorage implements DatasetStorage {
-  readonly kind: DatasetStorageKind = 'local';
+  readonly kind: DatasetStorageKind = "local";
 
   constructor(private readonly rootDir: string) {}
 
-  async writeObject(input: WriteDatasetObjectInput): Promise<WrittenDatasetObject> {
+  async writeObject(
+    input: WriteDatasetObjectInput,
+  ): Promise<WrittenDatasetObject> {
     const absolutePath = resolve(join(this.rootDir, input.key));
-    await mkdir(resolve(absolutePath, '..'), { recursive: true });
+    await mkdir(resolve(absolutePath, ".."), { recursive: true });
     const body = input.body;
     await writeFile(absolutePath, body);
-    const sizeBytes = typeof body === 'string' ? Buffer.byteLength(body, 'utf8') : body.length;
+    const sizeBytes =
+      typeof body === "string" ? Buffer.byteLength(body, "utf8") : body.length;
     return {
       key: input.key,
       uri: `local://${absolutePath}`,

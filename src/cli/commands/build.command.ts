@@ -6,9 +6,18 @@ import type {
   DexBuildConfig,
   ResolvedDexBuildConfig,
 } from "../../config/dex-build-config.types.js";
+import {
+  parsePairsList,
+  parsePoolsList,
+} from "../../simple/normalize-simple-pool-selections.js";
 import { resolveSimpleDexBuildConfig } from "../../simple/resolve-simple-build-config.js";
-import type { SimpleDexBuildInput } from "../../simple/simple-build.types.js";
+import type {
+  SimpleDexBuildInput,
+  SimplePairSelectionInput,
+  SimplePoolSelectionInput,
+} from "../../simple/simple-build.types.js";
 import { buildDexPoolDataset } from "../../orchestrator/build-dex-pool-dataset.js";
+import type { DexBuildProgressEvent } from "../../orchestrator/dex-build-progress.types.js";
 import type { DexBuildRunReport } from "../../orchestrator/dex-build-result.types.js";
 import type { DexPoolQualitySummary } from "../../types/dex-pool-dataset.types.js";
 import { printLine, printError, printJson } from "../cli-output.js";
@@ -17,12 +26,14 @@ type BuildCommandOptions = {
   config?: string;
   profile?: string;
   pool?: string;
+  pools?: string;
+  pair?: string;
+  pairs?: string;
   output?: string;
   json?: boolean;
   verbose?: boolean;
 
   chain?: string;
-  pair?: string;
   fee?: string;
   token0?: string;
   token1?: string;
@@ -70,6 +81,71 @@ function formatQualityFailures(quality: DexPoolQualitySummary): string {
   return failures.join(", ");
 }
 
+function printProgressEvent(event: DexBuildProgressEvent): void {
+  switch (event.type) {
+    case "build_start":
+      printLine(`Starting build: ${event.datasetId}`);
+      break;
+
+    case "pool_start":
+      printLine(`Processing pool ${event.poolId} (${event.poolAddress})`);
+      break;
+
+    case "logs_read_start":
+      printLine(
+        `Reading logs: ${event.chunks} chunks, blocks ${event.fromBlock} – ${event.toBlock}`,
+      );
+      break;
+
+    case "logs_chunk_start":
+      printLine(
+        `Reading logs chunk ${event.index}/${event.total}: ${event.fromBlock} – ${event.toBlock}`,
+      );
+      break;
+
+    case "logs_chunk_done":
+      printLine(
+        `Logs chunk ${event.index}/${event.total} done: ${event.logCount} logs`,
+      );
+      break;
+
+    case "timestamps_progress":
+      printLine(
+        `Fetching timestamps: ${event.done}${event.total > 0 ? `/${event.total}` : ""} ` +
+          `(cache hits=${event.cacheHits}, misses=${event.cacheMisses})`,
+      );
+      break;
+
+    case "swaps_decoded":
+      printLine(`Decoded swaps: ${event.swaps}`);
+      break;
+
+    case "candles_build_start":
+      printLine(`Building ${event.timeframe} candles...`);
+      break;
+
+    case "candles_fill_done":
+      printLine(`Filled no-trade intervals: ${event.filledNoTradeIntervals}`);
+      break;
+
+    case "timeframe_aggregate_done":
+      printLine(`Aggregated ${event.timeframe}: ${event.candles} candles`);
+      break;
+
+    case "write_start":
+      printLine(`Writing output for ${event.poolId}...`);
+      break;
+
+    case "write_done":
+      printLine(`Wrote ${event.objects} objects for ${event.poolId}`);
+      break;
+
+    case "build_done":
+      printLine(`Build ${event.status}: ${event.datasetId}`);
+      break;
+  }
+}
+
 export function formatRunReport(
   report: DexBuildRunReport,
   verbose: boolean,
@@ -115,6 +191,12 @@ export function formatRunReport(
         lines.push(
           `   Quality: ${qualityLabel}${failures ? ` (${failures})` : ""}`,
         );
+
+        if (pool.quality.noTradeIntervals > 0) {
+          lines.push(
+            `   Filled no-trade intervals: ${pool.quality.noTradeIntervals}`,
+          );
+        }
       }
 
       if (pool.writtenObjects.length > 0) {
@@ -171,27 +253,30 @@ export async function runBuildCommand(
     process.exit(1);
   }
 
-  const { runReport, status } = await buildDexPoolDataset(resolved).catch(
-    (error: unknown) => {
-      const message = error instanceof Error ? error.message : String(error);
+  try {
+    const { runReport, status } = await buildDexPoolDataset(resolved, {
+      onProgress:
+        verbose === true && json !== true ? printProgressEvent : undefined,
+    });
 
-      if (json === true) {
-        printJson({ error: message });
-      } else {
-        printError(`Build failed: ${message}`);
-      }
+    if (json === true) {
+      printJson(runReport);
+    } else {
+      printLine(formatRunReport(runReport, verbose === true));
+    }
 
-      process.exit(1);
-    },
-  );
+    process.exit(status === "completed" ? 0 : 1);
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
 
-  if (json === true) {
-    printJson(runReport);
-  } else {
-    printLine(formatRunReport(runReport, verbose === true));
+    if (json === true) {
+      printJson({ error: message });
+    } else {
+      printError(`Build failed: ${message}`);
+    }
+
+    process.exit(1);
   }
-
-  process.exit(status === "completed" ? 0 : 1);
 }
 
 async function resolveBuildConfigFromFile(
@@ -240,7 +325,9 @@ async function resolveSimpleBuildConfigFromCli(
   return resolveSimpleDexBuildConfig({
     chain: options.chain,
     pool: options.pool,
+    pools: parsePoolsList(options.pools),
     pair: options.pair,
+    pairs: parsePairsList(options.pairs),
     fee: options.fee,
     token0: options.token0,
     token1: options.token1,
@@ -269,30 +356,58 @@ function simpleInputFromConfig(
   }
 
   const rpc = typeof rawConfig.rpc === "string" ? rawConfig.rpc : undefined;
+  const cliPairs = parsePairsList(options.pairs);
+  const cliPools = parsePoolsList(options.pools);
 
   return {
-    chain: requiredString(rawConfig.chain, "chain"),
+    chain: options.chain ?? requiredString(rawConfig.chain, "chain"),
+
     pool: options.pool ?? optionalString(rawConfig.pool),
+    pools: cliPools ?? parseStringArray(rawConfig.pools),
+
     pair: options.pair ?? optionalString(rawConfig.pair),
+    pairs: cliPairs ?? parsePairsConfig(rawConfig.pairs),
+
     fee: options.fee ?? optionalStringOrNumber(rawConfig.fee),
+
     token0: options.token0 ?? optionalString(rawConfig.token0),
     token1: options.token1 ?? optionalString(rawConfig.token1),
-    from: requiredString(rawConfig.from, "from"),
-    to: optionalString(rawConfig.to),
-    days: typeof rawConfig.days === "number" ? rawConfig.days : undefined,
-    rpcUrl: rpc !== undefined && !rpc.startsWith("env:") ? rpc : undefined,
-    rpcUrlEnv: rpc?.startsWith("env:")
-      ? rpc.slice("env:".length)
-      : optionalString(rawConfig.rpcUrlEnv),
+
+    symbols: parseSymbolsConfig(rawConfig.symbols),
+
+    from: options.from ?? requiredString(rawConfig.from, "from"),
+    to: options.to ?? optionalString(rawConfig.to),
+    days:
+      options.days !== undefined
+        ? Number(options.days)
+        : optionalNumber(rawConfig.days),
+
+    rpcUrl:
+      options.rpc ??
+      (rpc !== undefined && !rpc.startsWith("env:") ? rpc : undefined),
+    rpcUrlEnv:
+      options.rpcEnv ??
+      (rpc?.startsWith("env:")
+        ? rpc.slice("env:".length)
+        : optionalString(rawConfig.rpcUrlEnv)),
+
     out: options.out ?? options.output ?? optionalString(rawConfig.out),
+
     base: options.base ?? optionalString(rawConfig.base),
     quote: options.quote ?? optionalString(rawConfig.quote),
+
     datasetId: options.datasetId ?? optionalString(rawConfig.datasetId),
-    baseTimeframe: optionalString(rawConfig.baseTimeframe),
-    timeframes: Array.isArray(rawConfig.timeframes)
-      ? rawConfig.timeframes.map((value) => String(value))
-      : undefined,
-    chunkSize: optionalString(rawConfig.chunkSize),
+
+    baseTimeframe:
+      options.baseTimeframe ?? optionalString(rawConfig.baseTimeframe),
+    timeframes:
+      parseTimeframes(options.timeframes) ??
+      (Array.isArray(rawConfig.timeframes)
+        ? rawConfig.timeframes.map((value) => String(value))
+        : undefined),
+
+    chunkSize: options.chunkSize ?? optionalStringOrNumber(rawConfig.chunkSize),
+
     failFast:
       typeof rawConfig.failFast === "boolean" ? rawConfig.failFast : true,
   };
@@ -307,6 +422,63 @@ function parseTimeframes(value: string | undefined): Timeframe[] | undefined {
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean) as Timeframe[];
+}
+
+function parseStringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  return value.map((item) => String(item)).filter((item) => item.length > 0);
+}
+
+function parsePairsConfig(
+  value: unknown,
+): SimplePairSelectionInput[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  return value.map((item) => {
+    if (typeof item === "string") {
+      return item;
+    }
+
+    if (isRecord(item)) {
+      return {
+        pair: requiredString(item.pair, "pairs[].pair"),
+        fee: optionalStringOrNumber(item.fee),
+        base: optionalString(item.base),
+        quote: optionalString(item.quote),
+      };
+    }
+
+    throw new Error("SIMPLE_CONFIG_PAIR_INVALID");
+  });
+}
+
+function parseSymbolsConfig(
+  value: unknown,
+): SimplePoolSelectionInput[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  return value.map((item) => {
+    if (!isRecord(item)) {
+      throw new Error("SIMPLE_CONFIG_SYMBOL_INVALID");
+    }
+
+    return {
+      pool: optionalString(item.pool),
+      pair: optionalString(item.pair),
+      fee: optionalStringOrNumber(item.fee),
+      token0: optionalString(item.token0),
+      token1: optionalString(item.token1),
+      base: optionalString(item.base),
+      quote: optionalString(item.quote),
+    };
+  });
 }
 
 function isAdvancedDexBuildConfig(value: unknown): value is DexBuildConfig {
@@ -348,6 +520,22 @@ function optionalStringOrNumber(value: unknown): string | undefined {
   return undefined;
 }
 
+function optionalNumber(value: unknown): number | undefined {
+  if (typeof value === "number") {
+    return value;
+  }
+
+  if (typeof value === "string" && value.length > 0) {
+    const parsed = Number(value);
+
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+
+  return undefined;
+}
+
 export function registerBuildCommand(program: Command): void {
   program
     .command("build")
@@ -360,7 +548,12 @@ export function registerBuildCommand(program: Command): void {
       "--pool <pool>",
       "Simple mode pool address, or advanced mode pool ID",
     )
+    .option("--pools <list>", "Comma-separated simple mode pool addresses")
     .option("--pair <pair>", "Simple mode pair selector, e.g. WETH/USDC")
+    .option(
+      "--pairs <list>",
+      "Comma-separated pair selectors, e.g. WETH/USDC,cbBTC/WETH:3000",
+    )
     .option("--fee <fee>", "Simple mode Uniswap v3 fee tier, e.g. 500")
     .option(
       "--token0 <address>",

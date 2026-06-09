@@ -1,13 +1,19 @@
 import { access, writeFile } from "node:fs/promises";
 import type { Command } from "commander";
 import { getSimpleChainPreset } from "../../simple/chain-presets.js";
+import {
+  parsePairsList,
+  parsePoolsList,
+} from "../../simple/normalize-simple-pool-selections.js";
 import { printError, printLine } from "../cli-output.js";
 
 type InitCommandOptions = {
   file?: string;
   chain?: string;
   pool?: string;
+  pools?: string;
   pair?: string;
+  pairs?: string;
   fee?: string;
   from?: string;
   to?: string;
@@ -28,29 +34,45 @@ export async function runInitCommand(
     process.exit(1);
   }
 
+  const parsedPairs = parsePairsList(options.pairs);
+  const parsedPools = parsePoolsList(options.pools);
+
+  const baseConfig = {
+    chain,
+    rpc: `env:${preset.defaultRpcUrlEnv}`,
+    from: options.from ?? "2024-01-01",
+    to: options.to ?? "2024-01-02",
+    timeframes: ["1m", "5m", "15m", "1h", "4h"],
+    out: "./data/dex-pool-datasets",
+  };
+
   const config =
-    options.pool !== undefined
+    parsedPools !== undefined && parsedPools.length > 0
       ? {
-          chain,
-          rpc: `env:${preset.defaultRpcUrlEnv}`,
-          pool: options.pool,
-          from: options.from ?? "2024-01-01",
-          to: options.to ?? "2024-01-02",
-          ...(options.base !== undefined ? { base: options.base } : {}),
-          ...(options.quote !== undefined ? { quote: options.quote } : {}),
-          timeframes: ["1m", "5m", "15m", "1h", "4h"],
-          out: "./data/dex-pool-datasets",
+          ...baseConfig,
+          pools: parsedPools,
         }
-      : {
-          chain,
-          rpc: `env:${preset.defaultRpcUrlEnv}`,
-          pair: options.pair ?? "WETH/USDC",
-          fee: Number(options.fee ?? 500),
-          from: options.from ?? "2024-01-01",
-          to: options.to ?? "2024-01-02",
-          timeframes: ["1m", "5m", "15m", "1h", "4h"],
-          out: "./data/dex-pool-datasets",
-        };
+      : options.pool !== undefined
+        ? {
+            ...baseConfig,
+            pool: options.pool,
+            ...(options.base !== undefined ? { base: options.base } : {}),
+            ...(options.quote !== undefined ? { quote: options.quote } : {}),
+          }
+        : parsedPairs !== undefined && parsedPairs.length > 0
+          ? {
+              ...baseConfig,
+              pairs: parsedPairs,
+            }
+          : {
+              ...baseConfig,
+              pairs: [
+                {
+                  pair: options.pair ?? "WETH/USDC",
+                  fee: Number(options.fee ?? 500),
+                },
+              ],
+            };
 
   await writeFile(file, `${JSON.stringify(config, null, 2)}\n`, "utf8");
 
@@ -76,7 +98,12 @@ export function registerInitCommand(program: Command): void {
     .option("--file <path>", "Config file to create")
     .option("--chain <chain>", "Chain, default base")
     .option("--pool <address>", "Pool contract address")
+    .option("--pools <list>", "Comma-separated pool contract addresses")
     .option("--pair <pair>", "Pair selector, default WETH/USDC")
+    .option(
+      "--pairs <list>",
+      "Comma-separated pair selectors, e.g. WETH/USDC,cbBTC/WETH:3000",
+    )
     .option("--fee <fee>", "Fee tier, default 500")
     .option("--from <date>", "From date")
     .option("--to <date>", "Exclusive to date")

@@ -13,35 +13,45 @@ on-chain Swap logs
   → replay-compatible JSONL
 ```
 
+---
+
 ## Current scope
 
-* simple CLI mode for Uniswap v3-style pools
-* pair-based pool resolution via Uniswap v3 factory `getPool`
-* direct pool-address builds
-* token preset resolution for common liquid pairs
-* pool registry validation for advanced mode
-* EVM block range planning
-* date range to block range resolution
-* EVM JSON-RPC `eth_getLogs` reads
-* block timestamp caching during a build via `eth_getBlockByNumber`
-* Uniswap v3 `Swap` log decoding
-* normalized swap to DEX pool candle conversion
-* no-trade fill-forward replay policy
-* timeframe aggregation
-* replay-compatible JSONL export adapter
-* DEX sidecar quality records
-* local and S3 output backends
+- simple CLI mode for Uniswap v3-style pools
+- pair-based pool resolution via Uniswap v3 factory `getPool`
+- direct pool-address builds
+- token-address + fee pool resolution
+- curated token/pair presets for common liquid pairs
+- pool registry validation for advanced mode
+- EVM block range planning
+- date range to block range resolution
+- EVM JSON-RPC `eth_getLogs` reads
+- block timestamp lookup via `eth_getBlockByNumber`
+- persistent block timestamp cache
+- Uniswap v3 `Swap` log decoding
+- normalized swap to DEX pool candle conversion
+- no-trade fill-forward replay policy
+- timeframe aggregation
+- replay-compatible JSONL export adapter
+- DEX sidecar quality records
+- local and S3 output backends
+- verbose progress logging for long-running builds
+- pool selection audit metadata in manifests
+- `.env` loading for RPC URLs
+- RPC retry/backoff for rate-limited providers
+
+---
 
 ## Out of scope for this package slice
 
-* full multi-DEX adapter support
-* full independent pool identity verification beyond Uniswap v3-style metadata/factory resolution
-* checkpointed/resumable backfills
-* persistent cross-run block timestamp cache
-* HTTP service orchestration
-* hosted API service
-* automatic liquidity ranking across all pools
-* production scheduling/orchestration
+- full multi-DEX adapter support
+- checkpointed/resumable backfills
+- HTTP service orchestration
+- hosted API service
+- automatic liquidity ranking across all pools
+- automatic discovery of all pools for a token pair
+- full production scheduler/orchestrator
+- full independent pool identity verification beyond Uniswap v3-style metadata/factory resolution
 
 ---
 
@@ -86,12 +96,70 @@ For historical builds, use an archive-capable RPC. Public RPC endpoints can work
 
 ---
 
+## Local CLI usage
+
+During development, run the CLI directly from TypeScript source:
+
+```bash
+npm run cli -- inspect --chain base --pair WETH/USDC
+
+npm run cli -- build \
+  --chain base \
+  --pair WETH/USDC \
+  --from 2024-01-01 \
+  --to 2024-01-02 \
+  --verbose
+```
+
+To run the compiled CLI through npm:
+
+```bash
+npm run build
+
+npm run dex-pool -- inspect --chain base --pair WETH/USDC
+
+npm run dex-pool -- build \
+  --chain base \
+  --pair WETH/USDC \
+  --from 2024-01-01 \
+  --to 2024-01-02 \
+  --verbose
+```
+
+To install the CLI locally as `dex-pool`:
+
+```bash
+npm run build
+npm link
+```
+
+Then use:
+
+```bash
+dex-pool inspect --chain base --pair WETH/USDC
+
+dex-pool build \
+  --chain base \
+  --pair WETH/USDC \
+  --from 2024-01-01 \
+  --to 2024-01-02 \
+  --verbose
+```
+
+To remove the local link:
+
+```bash
+npm unlink -g @trader-agent/dex-pool-datasets
+```
+
+---
+
 ## Quickstart
 
 Build a Base WETH/USDC Uniswap v3-style dataset by pair:
 
 ```bash
-node dist/cli/index.js build \
+dex-pool build \
   --chain base \
   --pair WETH/USDC \
   --fee 500 \
@@ -103,7 +171,7 @@ node dist/cli/index.js build \
 For curated liquid pairs with a known default fee, the fee can be omitted:
 
 ```bash
-node dist/cli/index.js build \
+dex-pool build \
   --chain base \
   --pair WETH/USDC \
   --from 2024-01-01 \
@@ -114,7 +182,7 @@ node dist/cli/index.js build \
 Build by direct pool contract:
 
 ```bash
-node dist/cli/index.js build \
+dex-pool build \
   --chain base \
   --pool 0xd0b53d9277642d899df5c87a3966a349a798f224 \
   --from 2024-01-01 \
@@ -125,7 +193,7 @@ node dist/cli/index.js build \
 Build by token addresses and fee:
 
 ```bash
-node dist/cli/index.js build \
+dex-pool build \
   --chain base \
   --token0 0x4200000000000000000000000000000000000006 \
   --token1 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913 \
@@ -142,7 +210,7 @@ node dist/cli/index.js build \
 Inspect by pair:
 
 ```bash
-node dist/cli/index.js inspect \
+dex-pool inspect \
   --chain base \
   --pair WETH/USDC \
   --fee 500
@@ -164,18 +232,48 @@ token1: USDC 0x833589fcd6edb6e08f4c7c32d4f71b54bda02913 decimals=6
 base/quote: WETH/USDC
 ```
 
+Inspect by curated pair preset:
+
+```bash
+dex-pool inspect \
+  --chain base \
+  --pair WETH/USDC
+```
+
+Expected resolution mode:
+
+```text
+Resolved by: liquid_pair_preset
+```
+
 Inspect by direct pool address:
 
 ```bash
-node dist/cli/index.js inspect \
+dex-pool inspect \
   --chain base \
   --pool 0xd0b53d9277642d899df5c87a3966a349a798f224
+```
+
+Expected resolution mode:
+
+```text
+Resolved by: direct_pool
+```
+
+Inspect by token addresses and fee:
+
+```bash
+dex-pool inspect \
+  --chain base \
+  --token0 0x4200000000000000000000000000000000000006 \
+  --token1 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913 \
+  --fee 500
 ```
 
 JSON output:
 
 ```bash
-node dist/cli/index.js inspect \
+dex-pool inspect \
   --chain base \
   --pair WETH/USDC \
   --fee 500 \
@@ -189,13 +287,13 @@ node dist/cli/index.js inspect \
 Check RPC and chain connectivity:
 
 ```bash
-node dist/cli/index.js doctor --chain base
+dex-pool doctor --chain base
 ```
 
 Check RPC, chain, and pool metadata:
 
 ```bash
-node dist/cli/index.js doctor \
+dex-pool doctor \
   --chain base \
   --pair WETH/USDC \
   --fee 500
@@ -217,7 +315,7 @@ Expected output:
 Create a local `dex-pool.config.json`:
 
 ```bash
-node dist/cli/index.js init --chain base --force
+dex-pool init --chain base --force
 ```
 
 Generated config:
@@ -238,12 +336,43 @@ Generated config:
 Build from config:
 
 ```bash
-node dist/cli/index.js build \
+dex-pool build \
   --config dex-pool.config.json \
   --verbose
 ```
 
 `dex-pool.config.json` is ignored by git. Use `config/dex-pool.config.example.json` as the committed example.
+
+---
+
+## Simple config example
+
+```json
+{
+  "chain": "base",
+  "rpc": "env:BASE_RPC_URL",
+  "pair": "WETH/USDC",
+  "fee": 500,
+  "from": "2024-01-01",
+  "to": "2024-01-02",
+  "timeframes": ["1m", "5m", "15m", "1h", "4h"],
+  "out": "./data/dex-pool-datasets"
+}
+```
+
+Alternative direct-pool config:
+
+```json
+{
+  "chain": "base",
+  "rpc": "env:BASE_RPC_URL",
+  "pool": "0xd0b53d9277642d899df5c87a3966a349a798f224",
+  "from": "2024-01-01",
+  "to": "2024-01-02",
+  "timeframes": ["1m", "5m", "15m", "1h", "4h"],
+  "out": "./data/dex-pool-datasets"
+}
+```
 
 ---
 
@@ -254,7 +383,22 @@ The package exports replay-compatible JSONL files.
 Each candle row is one JSON object per line:
 
 ```json
-{"symbol":"WETHUSDC","timeframe":"1m","openTime":1704067200000,"closeTime":1704067259999,"open":2280.12,"high":2281.04,"low":2279.88,"close":2280.55,"volume":12.345,"turnover":28152.44,"quoteVolume":28152.44,"trades":37,"closed":true,"source":"DEX_POOL"}
+{
+  "symbol": "WETHUSDC",
+  "timeframe": "1m",
+  "openTime": 1704067200000,
+  "closeTime": 1704067259999,
+  "open": 2280.12,
+  "high": 2281.04,
+  "low": 2279.88,
+  "close": 2280.55,
+  "volume": 12.345,
+  "turnover": 28152.44,
+  "quoteVolume": 28152.44,
+  "trades": 37,
+  "closed": true,
+  "source": "DEX_POOL"
+}
 ```
 
 Fields:
@@ -322,23 +466,77 @@ Each pool export includes a `manifest.json`.
 
 The manifest records:
 
-* dataset type
-* source mode
-* chain
-* DEX label
-* pool kind
-* pool address
-* token0/token1 metadata
-* base/quote token mapping
-* block range
-* actual exported time range
-* source event type
-* exported timeframes
-* replay safety policy
-* quality summary
-* generation timestamp
+- dataset type
+- source mode
+- chain
+- DEX label
+- pool kind
+- pool address
+- pool selection metadata
+- token0/token1 metadata
+- base/quote token mapping
+- block range
+- finality metadata
+- actual exported time range
+- source event type
+- exported timeframes
+- replay safety policy
+- quality summary
+- generation timestamp
 
 The dataset is exported as replay-compatible candles, but DEX-specific metadata is preserved in the manifest and sidecar quality records.
+
+---
+
+## Pool selection audit metadata
+
+Each manifest records how the pool was selected.
+
+For pair + explicit fee:
+
+```json
+{
+  "poolSelection": {
+    "resolvedBy": "factory_getPool",
+    "inputPair": "WETH/USDC",
+    "inputFee": 500,
+    "factoryAddress": "0x33128a8fC17869897dcE68Ed026d694621f6FDfD",
+    "token0": "0x4200000000000000000000000000000000000006",
+    "token1": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+    "resolvedPoolAddress": "0xd0b53d9277642d899df5c87a3966a349a798f224"
+  }
+}
+```
+
+For curated preset:
+
+```json
+{
+  "poolSelection": {
+    "resolvedBy": "liquid_pair_preset",
+    "inputPair": "WETH/USDC",
+    "presetFee": 500,
+    "factoryAddress": "0x33128a8fC17869897dcE68Ed026d694621f6FDfD",
+    "token0": "0x4200000000000000000000000000000000000006",
+    "token1": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+    "resolvedPoolAddress": "0xd0b53d9277642d899df5c87a3966a349a798f224"
+  }
+}
+```
+
+For direct pool address:
+
+```json
+{
+  "poolSelection": {
+    "resolvedBy": "direct_pool",
+    "inputPoolAddress": "0xd0b53d9277642d899df5c87a3966a349a798f224",
+    "resolvedPoolAddress": "0xd0b53d9277642d899df5c87a3966a349a798f224"
+  }
+}
+```
+
+This is important for auditability. A dataset should explain not only which pool was used, but also how that pool was selected.
 
 ---
 
@@ -349,7 +547,18 @@ The dataset is exported as replay-compatible candles, but DEX-specific metadata 
 Example:
 
 ```json
-{"symbol":"WETHUSDC","timeframe":"1m","openTime":1704067200000,"qualityFlags":{"noTradeInterval":true,"fillForwarded":true},"source":{"mode":"ONCHAIN_POOL_EVENTS","fromBlock":"8639000","toBlock":"8639000","poolAddress":"0xd0b53d9277642d899df5c87a3966a349a798f224"}}
+{
+  "symbol": "WETHUSDC",
+  "timeframe": "1m",
+  "openTime": 1704067200000,
+  "qualityFlags": { "noTradeInterval": true, "fillForwarded": true },
+  "source": {
+    "mode": "ONCHAIN_POOL_EVENTS",
+    "fromBlock": "8639000",
+    "toBlock": "8639000",
+    "poolAddress": "0xd0b53d9277642d899df5c87a3966a349a798f224"
+  }
+}
 ```
 
 No-trade intervals are normal for DEX pools.
@@ -379,11 +588,13 @@ chain + pair/pool + date range
   → resolve RPC
   → validate chainId
   → resolve date range to block range
+  → apply finality clipping when relevant
   → resolve pool address
   → read pool token metadata
   → read Swap logs via eth_getLogs
   → decode Uniswap v3 Swap logs
   → normalize swaps
+  → fetch/cache block timestamps
   → build base timeframe candles
   → fill no-trade intervals
   → aggregate requested timeframes
@@ -407,6 +618,90 @@ WETH/USDC + fee 500
 
 ---
 
+## Long-running builds
+
+For larger ranges, use `--verbose`:
+
+```bash
+dex-pool build \
+  --chain base \
+  --pair WETH/USDC \
+  --from 2024-01-01 \
+  --to 2024-02-01 \
+  --verbose
+```
+
+Verbose mode prints progress:
+
+```text
+Starting build: base-uniswap-v3-weth-usdc-500-d0b53d92-20240101-20240201
+Processing pool base-uniswap-v3-weth-usdc-500-d0b53d92
+Reading logs: 268 chunks, blocks 8638927 – 9978126
+Reading logs chunk 1/268: 8638927 – 8643926
+Logs chunk 1/268 done: 1234 logs
+Fetching timestamps: 1000 (cache hits=812, misses=188)
+Decoded swaps: 123456
+Building 1m candles...
+Filled no-trade intervals: 424
+Aggregated 5m: 8928 candles
+Aggregated 15m: 2976 candles
+Aggregated 1h: 744 candles
+Aggregated 4h: 186 candles
+Writing output...
+Wrote 7 objects
+Build completed: base-uniswap-v3-weth-usdc-500-d0b53d92-20240101-20240201
+```
+
+---
+
+## Persistent block timestamp cache
+
+Block timestamps are cached persistently under:
+
+```text
+.data/cache/<chain>/block-timestamps.jsonl
+```
+
+Example:
+
+```text
+.data/cache/base/block-timestamps.jsonl
+```
+
+Each row is JSONL:
+
+```json
+{ "blockNumber": "8638927", "hash": "0x...", "timestamp": 1704067200 }
+```
+
+This speeds up repeated or overlapping builds.
+
+Example:
+
+```bash
+rm -rf .data/cache
+
+time dex-pool build \
+  --chain base \
+  --pair WETH/USDC \
+  --from 2024-01-01 \
+  --to 2024-01-02 \
+  --dataset-id smoke-cache-miss \
+  --verbose
+
+time dex-pool build \
+  --chain base \
+  --pair WETH/USDC \
+  --from 2024-01-01 \
+  --to 2024-01-02 \
+  --dataset-id smoke-cache-hit \
+  --verbose
+```
+
+The second run should show more timestamp cache hits.
+
+---
+
 ## Supported simple-mode chains
 
 Current simple-mode chain presets:
@@ -420,6 +715,31 @@ Current simple-mode chain presets:
 | BSC      |     `56` | `BSC_RPC_URL`      |
 
 Simple mode currently uses the Uniswap v3-style pool interface. It does not expose a `--dex` flag yet.
+
+---
+
+## Token and pair presets
+
+Current Base token presets include:
+
+| Symbol  | Notes                        |
+| ------- | ---------------------------- |
+| `WETH`  | Wrapped ETH on Base          |
+| `USDC`  | Native USDC on Base          |
+| `cbBTC` | Coinbase wrapped BTC on Base |
+| `cbETH` | Coinbase wrapped ETH on Base |
+| `AERO`  | Aerodrome token on Base      |
+
+Current Base liquid pair presets include:
+
+| Pair         | Default fee |
+| ------------ | ----------: |
+| `WETH/USDC`  |       `500` |
+| `cbBTC/WETH` |      `3000` |
+| `WETH/cbETH` |       `500` |
+| `AERO/WETH`  |      `3000` |
+
+Presets are convenience defaults. The final pool address is still resolved through the Uniswap v3 factory and recorded in the manifest.
 
 ---
 
@@ -447,7 +767,7 @@ Default simple-mode timeframes:
 Override:
 
 ```bash
-node dist/cli/index.js build \
+dex-pool build \
   --chain base \
   --pair WETH/USDC \
   --fee 500 \
@@ -466,7 +786,7 @@ The original advanced workflow is still supported.
 Validate advanced config:
 
 ```bash
-node dist/cli/index.js validate \
+dex-pool validate \
   --config config/dex-dataset.config.example.json \
   --profile local
 ```
@@ -474,7 +794,7 @@ node dist/cli/index.js validate \
 Plan advanced config:
 
 ```bash
-node dist/cli/index.js plan \
+dex-pool plan \
   --config config/dex-dataset.config.example.json \
   --profile local \
   --json
@@ -483,7 +803,7 @@ node dist/cli/index.js plan \
 Build advanced config:
 
 ```bash
-node dist/cli/index.js build \
+dex-pool build \
   --config config/dex-dataset.config.example.json \
   --profile local \
   --verbose
@@ -491,11 +811,11 @@ node dist/cli/index.js build \
 
 Use advanced mode for:
 
-* explicit pool registry files
-* multi-pool datasets
-* pinned block ranges
-* S3 output
-* profile-based production builds
+- explicit pool registry files
+- multi-pool datasets
+- pinned block ranges
+- S3 output
+- profile-based production builds
 
 ---
 
@@ -512,7 +832,7 @@ Use an S3 URI:
 Or in CLI:
 
 ```bash
-node dist/cli/index.js build \
+dex-pool build \
   --chain base \
   --pair WETH/USDC \
   --fee 500 \
@@ -551,6 +871,63 @@ For repeated or large historical backfills, use a paid/archive RPC endpoint.
 
 ---
 
+## Production RPC guidance
+
+Public RPC endpoints are useful for smoke tests and small ranges.
+
+For production backfills, use a paid/archive-capable RPC endpoint because the builder relies on:
+
+- historical `eth_getLogs`
+- historical `eth_getBlockByNumber`
+- repeated block timestamp lookups
+- long-running backfills
+- retry/backoff under rate limits
+
+Example `.env`:
+
+```env
+# Public Base RPC. OK for smoke tests and small builds.
+BASE_RPC_URL=https://mainnet.base.org
+
+# Recommended for production backfills:
+# BASE_RPC_URL=https://base-mainnet.g.alchemy.com/v2/YOUR_KEY
+# BASE_RPC_URL=https://base-mainnet.infura.io/v3/YOUR_KEY
+# BASE_RPC_URL=https://base-mainnet.your-provider.example
+```
+
+---
+
+## Finality handling
+
+The builder supports confirmation-lag finality metadata.
+
+For historical ranges, finality usually does not change the requested block range.
+
+For ranges close to latest, the effective `toBlock` may be clipped to a safe block:
+
+```text
+safeToBlock = latestBlock - confirmations
+effectiveToBlock = min(requestedToBlock, safeToBlock)
+```
+
+The manifest records:
+
+```json
+{
+  "blockRange": {
+    "fromBlock": "8638927",
+    "toBlock": "8682126",
+    "finalizedToBlock": "12345678",
+    "requestedToBlock": "8682126",
+    "clippedToFinality": false,
+    "finalityMode": "confirmation_lag",
+    "confirmations": 64
+  }
+}
+```
+
+---
+
 ## Troubleshooting
 
 ### `SIMPLE_RPC_ENV_MISSING:BASE_RPC_URL`
@@ -563,11 +940,15 @@ BASE_RPC_URL=https://mainnet.base.org
 
 Then run again.
 
+---
+
 ### `EVM_RPC_HTTP_ERROR:429`
 
 The RPC provider rate-limited the request.
 
 Use a less restricted RPC endpoint, or retry later. The client has retry/backoff, but public endpoints can still throttle long builds.
+
+---
 
 ### `SIMPLE_POOL_NOT_FOUND`
 
@@ -575,19 +956,21 @@ The factory returned the zero address for the selected token pair and fee.
 
 Check:
 
-* chain
-* token symbols
-* token addresses
-* fee tier
+- chain
+- token symbols
+- token addresses
+- fee tier
 
 Example:
 
 ```bash
-node dist/cli/index.js inspect \
+dex-pool inspect \
   --chain base \
   --pair WETH/USDC \
   --fee 500
 ```
+
+---
 
 ### `NO_SWAPS_IN_RANGE`
 
@@ -595,10 +978,29 @@ The selected pool had no swaps in the resolved block range.
 
 Try:
 
-* a wider date range
-* a more liquid pair
-* a different fee tier
-* a later start date
+- a wider date range
+- a more liquid pair
+- a different fee tier
+- a later start date
+
+---
+
+### Build is slow
+
+Use `--verbose` to see progress:
+
+```bash
+dex-pool build \
+  --chain base \
+  --pair WETH/USDC \
+  --from 2024-01-01 \
+  --to 2024-02-01 \
+  --verbose
+```
+
+If the build is slow but CPU usage is low, the bottleneck is likely RPC/network latency or rate limiting.
+
+Use a paid/archive RPC for larger ranges.
 
 ---
 
@@ -622,10 +1024,94 @@ npm run cli -- inspect \
 Run compiled CLI:
 
 ```bash
-node dist/cli/index.js inspect \
+npm run dex-pool -- inspect \
   --chain base \
   --pair WETH/USDC \
   --fee 500
+```
+
+Run linked CLI:
+
+```bash
+dex-pool inspect \
+  --chain base \
+  --pair WETH/USDC \
+  --fee 500
+```
+
+---
+
+## Smoke tests
+
+Basic CLI wiring:
+
+```bash
+dex-pool --help
+dex-pool build --help
+dex-pool inspect --help
+dex-pool doctor --help
+```
+
+Doctor:
+
+```bash
+dex-pool doctor --chain base
+```
+
+Inspect pair:
+
+```bash
+dex-pool inspect \
+  --chain base \
+  --pair WETH/USDC \
+  --fee 500
+```
+
+Inspect curated preset:
+
+```bash
+dex-pool inspect \
+  --chain base \
+  --pair WETH/USDC
+```
+
+Inspect direct pool:
+
+```bash
+dex-pool inspect \
+  --chain base \
+  --pool 0xd0b53d9277642d899df5c87a3966a349a798f224
+```
+
+Build one day:
+
+```bash
+dex-pool build \
+  --chain base \
+  --pair WETH/USDC \
+  --from 2024-01-01 \
+  --to 2024-01-02 \
+  --dataset-id smoke-weth-usdc \
+  --verbose
+```
+
+Check output:
+
+```bash
+find ./data/dex-pool-datasets/smoke-weth-usdc -type f | sort
+```
+
+Check manifest metadata:
+
+```bash
+cat ./data/dex-pool-datasets/smoke-weth-usdc/*/manifest.json | jq '.poolSelection, .blockRange'
+```
+
+Check timestamp cache:
+
+```bash
+ls -lah .data/cache/base/block-timestamps.jsonl
+head -n 3 .data/cache/base/block-timestamps.jsonl
 ```
 
 ---
@@ -639,20 +1125,23 @@ npm run typecheck
 npm test
 npm run build
 
-node dist/cli/index.js doctor --chain base
+dex-pool doctor --chain base
 
-node dist/cli/index.js inspect \
+dex-pool inspect \
   --chain base \
   --pair WETH/USDC \
   --fee 500
 
-node dist/cli/index.js build \
+dex-pool build \
   --chain base \
   --pair WETH/USDC \
   --fee 500 \
   --from 2024-01-01 \
   --to 2024-01-02 \
+  --dataset-id pr-smoke-weth-usdc \
   --verbose
+
+cat ./data/dex-pool-datasets/pr-smoke-weth-usdc/*/manifest.json | jq '.poolSelection, .blockRange'
 ```
 
 Expected build output:
@@ -660,12 +1149,23 @@ Expected build output:
 ```text
 Dataset build completed
 
-Dataset: base-uniswap-v3-weth-usdc-500-d0b53d92-20240101-20240102
+Dataset: pr-smoke-weth-usdc
 Profile: simple
 Output: local://./data/dex-pool-datasets
 
 Pools:
  ✓ base-uniswap-v3-weth-usdc-500-d0b53d92 (WETHUSDC)
-   Timeframes: 1m, 5m, 15m, 1h, 4h
+   Timeframes: 1m, 5m, 15m, 1h, 4h, 1d
    Quality: passed
+```
+
+---
+
+## Recommended commit message
+
+```bash
+git add .
+
+git commit -m "feat: improve DEX pool build observability" \
+  -m "Add verbose progress logging, persistent block timestamp caching, pool selection audit metadata, additional Base token and pair presets, local CLI usage docs, and production RPC guidance."
 ```
