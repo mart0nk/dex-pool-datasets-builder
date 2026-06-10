@@ -33,6 +33,7 @@ jobs:
         run: |
           node dist/cli/index.js --help
           node dist/cli/index.js build --help
+          node dist/cli/index.js discover --help
           node dist/cli/index.js inspect --help
           node dist/cli/index.js doctor --help
 

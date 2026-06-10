@@ -13,6 +13,7 @@ describe('compiled CLI help', () => {
       stdio: 'pipe',
     });
     expect(topLevelHelp).toContain('build');
+    expect(topLevelHelp).toContain('discover');
     expect(topLevelHelp).toContain('inspect');
     expect(topLevelHelp).toContain('doctor');
     expect(topLevelHelp).toContain('init');
@@ -22,6 +23,7 @@ describe('compiled CLI help', () => {
     for (const args of [
       ['--help'],
       ['build', '--help'],
+      ['discover', '--help'],
       ['inspect', '--help'],
       ['doctor', '--help'],
     ]) {
