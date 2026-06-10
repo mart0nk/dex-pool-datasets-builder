@@ -1,9 +1,14 @@
 {
-  "name": "dex-pool-datasets",
+  "name": "@trader-agent/dex-pool-datasets",
   "version": "0.1.0",
   "description": "DEX pool dataset builder and replay export adapter",
   "type": "module",
   "private": true,
+  "files": [
+    "dist",
+    "README.md",
+    "package.json"
+  ],
   "bin": {
     "dex-pool-datasets": "./dist/cli/index.js",
     "dex-pool": "./dist/cli/index.js"

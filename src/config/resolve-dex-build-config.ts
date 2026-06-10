@@ -49,6 +49,7 @@ export function resolveDexBuildConfig(
   return {
     datasetId: config.datasetId,
     registryPath: config.registry.path,
+    registryPools: [],
     network: {
       chain: config.network.chain,
       chainId: config.network.chainId,

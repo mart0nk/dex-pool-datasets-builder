@@ -3,8 +3,6 @@
 import "dotenv/config";
 
 import { Command } from "commander";
-import { registerValidateCommand } from "./commands/validate.command.js";
-import { registerPlanCommand } from "./commands/plan.command.js";
 import { registerBuildCommand } from "./commands/build.command.js";
 import { registerInspectCommand } from "./commands/inspect.command.js";
 import { registerDoctorCommand } from "./commands/doctor.command.js";
@@ -21,9 +19,6 @@ registerBuildCommand(program);
 registerInspectCommand(program);
 registerDoctorCommand(program);
 registerInitCommand(program);
-
-registerValidateCommand(program);
-registerPlanCommand(program);
 
 program.parseAsync(process.argv).catch((error: unknown) => {
   process.stderr.write(

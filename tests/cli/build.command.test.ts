@@ -2,53 +2,49 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { formatRunReport, runBuildCommand } from '../../src/cli/commands/build.command.js';
 import type { DexBuildRunReport } from '../../src/orchestrator/dex-build-result.types.js';
 import type { ResolvedDexBuildConfig } from '../../src/config/dex-build-config.types.js';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 
-vi.mock('../../src/config/load-dex-build-config.js', () => ({
-  loadDexBuildConfig: vi.fn(),
-}));
-
-vi.mock('../../src/config/resolve-dex-build-config.js', () => ({
-  resolveDexBuildConfig: vi.fn(),
+vi.mock('../../src/simple/resolve-simple-build-config.js', () => ({
+  resolveSimpleDexBuildConfig: vi.fn(),
 }));
 
 vi.mock('../../src/orchestrator/build-dex-pool-dataset.js', () => ({
   buildDexPoolDataset: vi.fn(),
 }));
 
-import { loadDexBuildConfig } from '../../src/config/load-dex-build-config.js';
-import { resolveDexBuildConfig } from '../../src/config/resolve-dex-build-config.js';
+import { resolveSimpleDexBuildConfig } from '../../src/simple/resolve-simple-build-config.js';
 import { buildDexPoolDataset } from '../../src/orchestrator/build-dex-pool-dataset.js';
 
-const mockLoad = vi.mocked(loadDexBuildConfig);
-const mockResolve = vi.mocked(resolveDexBuildConfig);
+const mockResolveSimple = vi.mocked(resolveSimpleDexBuildConfig);
 const mockBuild = vi.mocked(buildDexPoolDataset);
-
-const MOCK_RAW_CONFIG = {
-  datasetId: 'base-uniswap-v3-weth-usdc-v1',
-  registry: { path: 'config/registry.json' },
-  network: {
-    chain: 'base',
-    chainId: 8453,
-    rpcUrlEnv: 'BASE_RPC_URL',
-  },
-  build: {
-    pools: ['base-uniswapv3-weth-usdc-500'],
-    fromBlock: '12345678',
-    toBlock: '12400000',
-    baseTimeframe: '1m' as const,
-    timeframes: ['1m', '5m', '15m', '1h'] as Array<import('../../src/contracts/timeframe.js').Timeframe>,
-    chunkSize: '5000',
-    failFast: true,
-  },
-  output: {
-    type: 'local' as const,
-    uri: 'local://./data/dex-pool-datasets',
-  },
-};
 
 const MOCK_RESOLVED: ResolvedDexBuildConfig = {
   datasetId: 'base-uniswap-v3-weth-usdc-v1',
-  registryPath: 'config/registry.json',
+  registryPools: [
+    {
+      id: 'base-uniswapv3-weth-usdc-500',
+      chain: 'base',
+      dex: 'uniswap_v3',
+      kind: 'UNISWAP_V3_STYLE',
+      poolAddress: '0x0000000000000000000000000000000000000001',
+      token0: {
+        symbol: 'WETH',
+        address: '0x0000000000000000000000000000000000000002',
+        decimals: 18,
+      },
+      token1: {
+        symbol: 'USDC',
+        address: '0x0000000000000000000000000000000000000003',
+        decimals: 6,
+      },
+      baseToken: 'token0',
+      quoteToken: 'token1',
+      feeTier: 500,
+      startBlock: '12345678',
+    },
+  ],
   network: {
     chain: 'base',
     chainId: 8453,
@@ -141,6 +137,7 @@ const MOCK_RUN_REPORT_FAILED: DexBuildRunReport = {
 let stdoutCapture: string[] = [];
 let stderrCapture: string[] = [];
 let exitCode: number | undefined;
+const tempDirs: string[] = [];
 
 beforeEach(() => {
   stdoutCapture = [];
@@ -160,19 +157,32 @@ beforeEach(() => {
     throw new Error(`process.exit(${String(code)})`);
   });
 
-  mockLoad.mockResolvedValue(MOCK_RAW_CONFIG);
-  mockResolve.mockReturnValue({ ...MOCK_RESOLVED, build: { ...MOCK_RESOLVED.build, pools: ['base-uniswapv3-weth-usdc-500'] } });
+  mockResolveSimple.mockResolvedValue({
+    ...MOCK_RESOLVED,
+    profile: 'simple',
+  });
   mockBuild.mockResolvedValue({ runReport: MOCK_RUN_REPORT_COMPLETED, status: 'completed' });
 });
 
-afterEach(() => {
+afterEach(async () => {
   vi.restoreAllMocks();
+  for (const dir of tempDirs.splice(0)) {
+    await rm(dir, { recursive: true, force: true });
+  }
 });
+
+async function writeSimpleConfig(body: unknown): Promise<string> {
+  const dir = await mkdtemp(join(tmpdir(), 'build-command-test-'));
+  tempDirs.push(dir);
+  const file = join(dir, 'dex-pool.config.json');
+  await writeFile(file, `${JSON.stringify(body, null, 2)}\n`, 'utf8');
+  return file;
+}
 
 describe('build command', () => {
   it('successful build prints completion message', async () => {
     await expect(
-      runBuildCommand({ config: 'dex-dataset.config.json' }),
+      runBuildCommand({ chain: 'base', pair: 'WETH/USDC', from: '2024-01-01', to: '2024-01-02' }),
     ).rejects.toThrow('process.exit(0)');
 
     const output = stdoutCapture.join('');
@@ -185,7 +195,7 @@ describe('build command', () => {
     mockBuild.mockResolvedValue({ runReport: MOCK_RUN_REPORT_FAILED, status: 'failed' });
 
     await expect(
-      runBuildCommand({ config: 'dex-dataset.config.json' }),
+      runBuildCommand({ chain: 'base', pair: 'WETH/USDC', from: '2024-01-01', to: '2024-01-02' }),
     ).rejects.toThrow('process.exit(1)');
 
     const output = stdoutCapture.join('');
@@ -195,7 +205,7 @@ describe('build command', () => {
 
   it('--json flag outputs valid JSON matching run report shape', async () => {
     await expect(
-      runBuildCommand({ config: 'dex-dataset.config.json', json: true }),
+      runBuildCommand({ chain: 'base', pair: 'WETH/USDC', from: '2024-01-01', to: '2024-01-02', json: true }),
     ).rejects.toThrow('process.exit(0)');
 
     const output = stdoutCapture.join('');
@@ -206,52 +216,87 @@ describe('build command', () => {
     expect(parsed.pools).toHaveLength(1);
   });
 
-  it('--pool override filters pool list before calling buildDexPoolDataset', async () => {
-    mockResolve.mockReturnValue({
-      ...MOCK_RESOLVED,
-      build: { ...MOCK_RESOLVED.build, pools: ['pool-a', 'pool-b'] },
+  it('loads --config as simple config and allows CLI overrides', async () => {
+    const file = await writeSimpleConfig({
+      chain: 'base',
+      rpc: 'env:BASE_RPC_URL',
+      pair: 'WETH/USDC',
+      from: '2024-01-01',
+      to: '2024-01-02',
+      out: './data/dex-pool-datasets',
     });
 
     await expect(
-      runBuildCommand({ config: 'dex-dataset.config.json', pool: 'pool-a' }),
-    ).rejects.toThrow('process.exit');
+      runBuildCommand({ config: file, pool: '0x0000000000000000000000000000000000000001' }),
+    ).rejects.toThrow('process.exit(0)');
 
+    expect(mockResolveSimple).toHaveBeenCalledWith(expect.objectContaining({
+      chain: 'base',
+      pool: '0x0000000000000000000000000000000000000001',
+      pair: 'WETH/USDC',
+      from: '2024-01-01',
+      to: '2024-01-02',
+    }));
+  });
+
+  it('uses simple CLI mode without --config and treats --pool as a pool address', async () => {
+    await expect(
+      runBuildCommand({
+        chain: 'base',
+        pool: '0x0000000000000000000000000000000000000001',
+        from: '2024-01-01',
+        to: '2024-01-02',
+      }),
+    ).rejects.toThrow('process.exit(0)');
+
+    expect(mockResolveSimple).toHaveBeenCalledWith(expect.objectContaining({
+      chain: 'base',
+      pool: '0x0000000000000000000000000000000000000001',
+      from: '2024-01-01',
+      to: '2024-01-02',
+    }));
     expect(mockBuild).toHaveBeenCalledOnce();
-    const calledWith = mockBuild.mock.calls[0]![0];
-    expect(calledWith.build.pools).toEqual(['pool-a']);
   });
 
-  it('--pool override with unknown pool ID exits 1 and prints error', async () => {
-    mockResolve.mockReturnValue({
-      ...MOCK_RESOLVED,
-      build: { ...MOCK_RESOLVED.build, pools: ['pool-a', 'pool-b'] },
-    });
-
+  it('passes comma-separated --pairs through simple mode parsing', async () => {
     await expect(
-      runBuildCommand({ config: 'dex-dataset.config.json', pool: 'unknown-pool' }),
-    ).rejects.toThrow('process.exit(1)');
+      runBuildCommand({
+        chain: 'base',
+        pairs: 'WETH/USDC,cbBTC/WETH:3000',
+        from: '2024-01-01',
+        to: '2024-01-02',
+      }),
+    ).rejects.toThrow('process.exit(0)');
 
-    expect(mockBuild).not.toHaveBeenCalled();
-    expect(exitCode).toBe(1);
+    expect(mockResolveSimple).toHaveBeenCalledWith(expect.objectContaining({
+      pairs: [
+        'WETH/USDC',
+        'cbBTC/WETH:3000',
+      ],
+    }));
   });
 
-  it('--profile is forwarded to resolveDexBuildConfig', async () => {
+  it('--json --verbose keeps stdout as clean JSON and disables progress callback', async () => {
     await expect(
-      runBuildCommand({ config: 'dex-dataset.config.json', profile: 'local' }),
-    ).rejects.toThrow('process.exit');
+      runBuildCommand({
+        chain: 'base',
+        pair: 'WETH/USDC',
+        from: '2024-01-01',
+        to: '2024-01-02',
+        json: true,
+        verbose: true,
+      }),
+    ).rejects.toThrow('process.exit(0)');
 
-    expect(mockResolve).toHaveBeenCalledWith(
-      expect.objectContaining({ profile: 'local' }),
-    );
+    expect(() => JSON.parse(stdoutCapture.join(''))).not.toThrow();
+    expect(mockBuild.mock.calls[0]![1]?.onProgress).toBeUndefined();
   });
 
-  it('CONFIG_RPC_ENV_MISSING error prints friendly message with env var name', async () => {
-    mockResolve.mockImplementation(() => {
-      throw new Error('CONFIG_RPC_ENV_MISSING:BASE_RPC_URL');
-    });
+  it('simple resolver errors print a resolving error and exit 1', async () => {
+    mockResolveSimple.mockRejectedValue(new Error('SIMPLE_RPC_ENV_MISSING:BASE_RPC_URL'));
 
     await expect(
-      runBuildCommand({ config: 'dex-dataset.config.json' }),
+      runBuildCommand({ chain: 'base', pair: 'WETH/USDC', from: '2024-01-01', to: '2024-01-02' }),
     ).rejects.toThrow('process.exit(1)');
 
     const errOutput = stderrCapture.join('');
@@ -259,19 +304,6 @@ describe('build command', () => {
     expect(exitCode).toBe(1);
   });
 
-  it('CONFIG_UNKNOWN_PROFILE error prints friendly message with profile name', async () => {
-    mockResolve.mockImplementation(() => {
-      throw new Error('CONFIG_UNKNOWN_PROFILE:staging');
-    });
-
-    await expect(
-      runBuildCommand({ config: 'dex-dataset.config.json', profile: 'staging' }),
-    ).rejects.toThrow('process.exit(1)');
-
-    const errOutput = stderrCapture.join('');
-    expect(errOutput).toContain('staging');
-    expect(exitCode).toBe(1);
-  });
 });
 
 describe('formatRunReport', () => {

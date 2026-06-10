@@ -1,11 +1,7 @@
+import { readFile } from "node:fs/promises";
 import type { Command } from "commander";
 import type { Timeframe } from "../../contracts/timeframe.js";
-import { loadDexBuildConfig } from "../../config/load-dex-build-config.js";
-import { resolveDexBuildConfig } from "../../config/resolve-dex-build-config.js";
-import type {
-  DexBuildConfig,
-  ResolvedDexBuildConfig,
-} from "../../config/dex-build-config.types.js";
+import type { ResolvedDexBuildConfig } from "../../config/dex-build-config.types.js";
 import {
   parsePairsList,
   parsePoolsList,
@@ -24,7 +20,6 @@ import { printLine, printError, printJson } from "../cli-output.js";
 
 type BuildCommandOptions = {
   config?: string;
-  profile?: string;
   pool?: string;
   pools?: string;
   pair?: string;
@@ -54,26 +49,18 @@ type BuildCommandOptions = {
 function formatQualityFailures(quality: DexPoolQualitySummary): string {
   const failures: string[] = [];
 
-  if (quality.reorgConflicts > 0) {
+  if (quality.reorgConflicts > 0)
     failures.push(`reorgConflicts: ${quality.reorgConflicts}`);
-  }
-
-  if (quality.invalidLogs > 0) {
+  if (quality.invalidLogs > 0)
     failures.push(`invalidLogs: ${quality.invalidLogs}`);
-  }
-
-  if (quality.duplicateLogs > 0) {
+  if (quality.duplicateLogs > 0)
     failures.push(`duplicateLogs: ${quality.duplicateLogs}`);
-  }
-
   if (quality.missingBlockTimestamps > 0) {
     failures.push(`missingBlockTimestamps: ${quality.missingBlockTimestamps}`);
   }
-
   if (quality.incompleteBlockRanges > 0) {
     failures.push(`incompleteBlockRanges: ${quality.incompleteBlockRanges}`);
   }
-
   if (quality.extremeWickCandles > 0) {
     failures.push(`extremeWickCandles: ${quality.extremeWickCandles}`);
   }
@@ -86,60 +73,48 @@ function printProgressEvent(event: DexBuildProgressEvent): void {
     case "build_start":
       printLine(`Starting build: ${event.datasetId}`);
       break;
-
     case "pool_start":
       printLine(`Processing pool ${event.poolId} (${event.poolAddress})`);
       break;
-
     case "logs_read_start":
       printLine(
         `Reading logs: ${event.chunks} chunks, blocks ${event.fromBlock} – ${event.toBlock}`,
       );
       break;
-
     case "logs_chunk_start":
       printLine(
         `Reading logs chunk ${event.index}/${event.total}: ${event.fromBlock} – ${event.toBlock}`,
       );
       break;
-
     case "logs_chunk_done":
       printLine(
         `Logs chunk ${event.index}/${event.total} done: ${event.logCount} logs`,
       );
       break;
-
     case "timestamps_progress":
       printLine(
         `Fetching timestamps: ${event.done}${event.total > 0 ? `/${event.total}` : ""} ` +
           `(cache hits=${event.cacheHits}, misses=${event.cacheMisses})`,
       );
       break;
-
     case "swaps_decoded":
       printLine(`Decoded swaps: ${event.swaps}`);
       break;
-
     case "candles_build_start":
       printLine(`Building ${event.timeframe} candles...`);
       break;
-
     case "candles_fill_done":
       printLine(`Filled no-trade intervals: ${event.filledNoTradeIntervals}`);
       break;
-
     case "timeframe_aggregate_done":
       printLine(`Aggregated ${event.timeframe}: ${event.candles} candles`);
       break;
-
     case "write_start":
       printLine(`Writing output for ${event.poolId}...`);
       break;
-
     case "write_done":
       printLine(`Wrote ${event.objects} objects for ${event.poolId}`);
       break;
-
     case "build_done":
       printLine(`Build ${event.status}: ${event.datasetId}`);
       break;
@@ -180,23 +155,17 @@ export function formatRunReport(
 
       if (pool.quality.passed) {
         lines.push(`   Quality: ${qualityLabel}`);
-
-        if (pool.quality.noTradeIntervals > 0) {
-          lines.push(
-            `   Filled no-trade intervals: ${pool.quality.noTradeIntervals}`,
-          );
-        }
       } else {
         const failures = formatQualityFailures(pool.quality);
         lines.push(
           `   Quality: ${qualityLabel}${failures ? ` (${failures})` : ""}`,
         );
+      }
 
-        if (pool.quality.noTradeIntervals > 0) {
-          lines.push(
-            `   Filled no-trade intervals: ${pool.quality.noTradeIntervals}`,
-          );
-        }
+      if (pool.quality.noTradeIntervals > 0) {
+        lines.push(
+          `   Filled no-trade intervals: ${pool.quality.noTradeIntervals}`,
+        );
       }
 
       if (pool.writtenObjects.length > 0) {
@@ -253,19 +222,14 @@ export async function runBuildCommand(
     process.exit(1);
   }
 
+  let runReport: DexBuildRunReport;
+  let status: "completed" | "failed";
+
   try {
-    const { runReport, status } = await buildDexPoolDataset(resolved, {
+    ({ runReport, status } = await buildDexPoolDataset(resolved, {
       onProgress:
         verbose === true && json !== true ? printProgressEvent : undefined,
-    });
-
-    if (json === true) {
-      printJson(runReport);
-    } else {
-      printLine(formatRunReport(runReport, verbose === true));
-    }
-
-    process.exit(status === "completed" ? 0 : 1);
+    }));
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
 
@@ -277,6 +241,14 @@ export async function runBuildCommand(
 
     process.exit(1);
   }
+
+  if (json === true) {
+    printJson(runReport);
+  } else {
+    printLine(formatRunReport(runReport, verbose === true));
+  }
+
+  process.exit(status === "completed" ? 0 : 1);
 }
 
 async function resolveBuildConfigFromFile(
@@ -286,28 +258,7 @@ async function resolveBuildConfigFromFile(
     throw new Error("CONFIG_PATH_REQUIRED");
   }
 
-  const rawConfig = (await loadDexBuildConfig(options.config)) as unknown;
-
-  if (isAdvancedDexBuildConfig(rawConfig)) {
-    const resolved = resolveDexBuildConfig({
-      config: rawConfig,
-      profile: options.profile,
-      outputOverride: options.output,
-    });
-
-    if (options.pool !== undefined) {
-      if (!resolved.build.pools.includes(options.pool)) {
-        throw new Error(
-          `POOL_NOT_FOUND_IN_CONFIG:${options.pool}:${resolved.build.pools.join(",")}`,
-        );
-      }
-
-      resolved.build.pools = [options.pool];
-    }
-
-    return resolved;
-  }
-
+  const rawConfig = await loadSimpleBuildConfig(options.config);
   return resolveSimpleDexBuildConfig(simpleInputFromConfig(rawConfig, options));
 }
 
@@ -413,6 +364,11 @@ function simpleInputFromConfig(
   };
 }
 
+async function loadSimpleBuildConfig(path: string): Promise<unknown> {
+  const raw = await readFile(path, "utf8");
+  return JSON.parse(raw) as unknown;
+}
+
 function parseTimeframes(value: string | undefined): Timeframe[] | undefined {
   if (value === undefined) {
     return undefined;
@@ -481,17 +437,6 @@ function parseSymbolsConfig(
   });
 }
 
-function isAdvancedDexBuildConfig(value: unknown): value is DexBuildConfig {
-  return (
-    isRecord(value) &&
-    typeof value.datasetId === "string" &&
-    isRecord(value.registry) &&
-    isRecord(value.network) &&
-    isRecord(value.build) &&
-    isRecord(value.output)
-  );
-}
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -540,45 +485,29 @@ export function registerBuildCommand(program: Command): void {
   program
     .command("build")
     .description(
-      "Build DEX pool dataset. Use --config for config mode, or --chain/--pair/--from/--to for simple mode.",
+      "Build DEX pool dataset from simple CLI flags or dex-pool.config.json.",
     )
-    .option("-c, --config <path>", "Path to config file")
-    .option("--profile <profile>", "Advanced config profile to use")
-    .option(
-      "--pool <pool>",
-      "Simple mode pool address, or advanced mode pool ID",
-    )
-    .option("--pools <list>", "Comma-separated simple mode pool addresses")
-    .option("--pair <pair>", "Simple mode pair selector, e.g. WETH/USDC")
+    .option("-c, --config <path>", "Path to dex-pool.config.json")
+    .option("--pool <address>", "Pool contract address")
+    .option("--pools <list>", "Comma-separated pool contract addresses")
+    .option("--pair <pair>", "Pair selector, e.g. WETH/USDC")
     .option(
       "--pairs <list>",
       "Comma-separated pair selectors, e.g. WETH/USDC,cbBTC/WETH:3000",
     )
-    .option("--fee <fee>", "Simple mode Uniswap v3 fee tier, e.g. 500")
-    .option(
-      "--token0 <address>",
-      "Simple mode token0/tokenA address for factory.getPool",
-    )
-    .option(
-      "--token1 <address>",
-      "Simple mode token1/tokenB address for factory.getPool",
-    )
+    .option("--fee <fee>", "Uniswap v3 fee tier, e.g. 500")
+    .option("--token0 <address>", "token0/tokenA address for factory.getPool")
+    .option("--token1 <address>", "token1/tokenB address for factory.getPool")
     .option("--output <uri>", "Output URI override, local:// or s3://")
     .option("--json", "Output run report as JSON")
     .option("--verbose", "Verbose output")
-    .option("--chain <chain>", "Simple mode chain, e.g. base")
-    .option("--from <date>", "Simple mode from date/time, e.g. 2024-01-01")
-    .option(
-      "--to <date>",
-      "Simple mode exclusive to date/time, e.g. 2024-02-01",
-    )
-    .option(
-      "--days <days>",
-      "Simple mode duration in days when --to is omitted",
-    )
-    .option("--rpc <url>", "Simple mode direct RPC URL")
-    .option("--rpc-env <env>", "Simple mode RPC environment variable name")
-    .option("--out <pathOrUri>", "Simple mode output path or URI")
+    .option("--chain <chain>", "Chain, e.g. base")
+    .option("--from <date>", "From date/time, e.g. 2024-01-01")
+    .option("--to <date>", "Exclusive to date/time, e.g. 2024-02-01")
+    .option("--days <days>", "Duration in days when --to is omitted")
+    .option("--rpc <url>", "Direct RPC URL")
+    .option("--rpc-env <env>", "RPC environment variable name")
+    .option("--out <pathOrUri>", "Output path or URI")
     .option("--base <symbolOrAddress>", "Base token selector, e.g. WETH")
     .option("--quote <symbolOrAddress>", "Quote token selector, e.g. USDC")
     .option(
