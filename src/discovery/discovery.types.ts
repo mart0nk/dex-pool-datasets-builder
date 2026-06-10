@@ -4,10 +4,7 @@ import type {
   DexPoolConfig,
 } from "../types/dex-pool-dataset.types.js";
 
-export type DiscoveryMetric =
-  | "totalValueLockedUSD"
-  | "volumeUSD"
-  | "liquidity";
+export type DiscoveryMetric = "totalValueLockedUSD" | "volumeUSD" | "liquidity";
 
 export type UniswapV3SubgraphDiscoveryInput = {
   source: "uniswap_v3_subgraph";
@@ -40,4 +37,3 @@ export type DiscoveredDexPool = {
     pair: string;
   };
 };
-

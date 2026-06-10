@@ -39,6 +39,7 @@ export async function discoverTopUniswapV3Pools(
 ): Promise<DiscoveredDexPool[]> {
   const metric = normalizeDiscoveryMetric(input.top.by);
   const limit = normalizeLimit(input.top.limit);
+  const requestedFirst = Math.min(limit * 5, 1000);
   const query = buildTopPoolsQuery(metric);
   const response = await fetch(input.subgraphUrl, {
     method: "POST",
@@ -48,7 +49,7 @@ export async function discoverTopUniswapV3Pools(
     },
     body: JSON.stringify({
       query,
-      variables: buildGraphQlVariables(input, limit),
+      variables: buildGraphQlVariables(input, requestedFirst),
     }),
   });
 
@@ -64,7 +65,9 @@ export async function discoverTopUniswapV3Pools(
 
   if (Array.isArray(payload.errors) && payload.errors.length > 0) {
     const firstError = payload.errors[0] as unknown;
-    throw new Error(`DISCOVERY_SUBGRAPH_GRAPHQL_ERROR:${formatGraphQlError(firstError)}`);
+    throw new Error(
+      `DISCOVERY_SUBGRAPH_GRAPHQL_ERROR:${formatGraphQlError(firstError)}`,
+    );
   }
 
   const rows = readPoolRows(payload);
@@ -86,25 +89,31 @@ export async function discoverTopUniswapV3Pools(
       continue;
     }
 
-    if (includePairs.size > 0 && !pairFilterMatches(includePairs, mapped.discovery.pair)) {
+    if (
+      includePairs.size > 0 &&
+      !pairFilterMatches(includePairs, mapped.discovery.pair)
+    ) {
       continue;
     }
 
-    if (excludePairs.size > 0 && pairFilterMatches(excludePairs, mapped.discovery.pair)) {
+    if (
+      excludePairs.size > 0 &&
+      pairFilterMatches(excludePairs, mapped.discovery.pair)
+    ) {
       continue;
     }
 
-    discovered.push({
-      ...mapped,
-      rank: discovered.length + 1,
-      discovery: {
-        ...mapped.discovery,
-        rank: discovered.length + 1,
-      },
-    });
+    discovered.push(mapped);
   }
 
-  return discovered;
+  return discovered.slice(0, limit).map((item, index) => ({
+    ...item,
+    rank: index + 1,
+    discovery: {
+      ...item.discovery,
+      rank: index + 1,
+    },
+  }));
 }
 
 export function normalizeDiscoveryMetric(metric: string): DiscoveryMetric {
@@ -169,7 +178,11 @@ function parseGraphQlPayload(text: string): Record<string, unknown> {
   try {
     const payload = JSON.parse(text) as unknown;
 
-    if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
+    if (
+      typeof payload !== "object" ||
+      payload === null ||
+      Array.isArray(payload)
+    ) {
       throw new Error("not_object");
     }
 
@@ -202,7 +215,10 @@ function mapPoolRow(input: {
   metric: DiscoveryMetric;
   snapshotAt: string;
 }): DiscoveredDexPool {
-  const poolAddress = assertEvmAddress(readString(input.row.id, "pool.id"), "pool.id");
+  const poolAddress = assertEvmAddress(
+    readString(input.row.id, "pool.id"),
+    "pool.id",
+  );
   const token0 = readToken(input.row.token0, "token0");
   const token1 = readToken(input.row.token1, "token1");
   const feeTier = readInteger(input.row.feeTier, "feeTier");
@@ -329,4 +345,3 @@ function formatGraphQlError(error: unknown): string {
 
   return String(error);
 }
-

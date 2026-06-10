@@ -56,7 +56,10 @@ export async function runDiscoverCommand(
           "min-volume-usd",
         ),
       },
-      includeFees: parseOptionalIntegerList(options.includeFees, "include-fees"),
+      includeFees: parseOptionalIntegerList(
+        options.includeFees,
+        "include-fees",
+      ),
       includePairs: parseOptionalStringList(options.includePairs),
       excludePairs: parseOptionalStringList(options.excludePairs),
     });
@@ -144,7 +147,10 @@ function formatDiscoveredPoolsTable(
 
   return rows
     .map((row) =>
-      row.map((cell, index) => cell.padEnd(widths[index]!)).join("  ").trimEnd(),
+      row
+        .map((cell, index) => cell.padEnd(widths[index]!))
+        .join("  ")
+        .trimEnd(),
     )
     .join("\n");
 }
@@ -189,7 +195,9 @@ function normalizeChain(chain: string | undefined): DexChain {
   return getSimpleChainPreset(chain).chain;
 }
 
-function parseOptionalStringList(value: string | undefined): string[] | undefined {
+function parseOptionalStringList(
+  value: string | undefined,
+): string[] | undefined {
   if (value === undefined) {
     return undefined;
   }
@@ -258,7 +266,10 @@ export function registerDiscoverCommand(program: Command): void {
     .option("--subgraph-url <url>", "Direct Uniswap v3 subgraph GraphQL URL")
     .option("--subgraph-url-env <env>", "Environment variable for subgraph URL")
     .option("--json", "Output JSON")
-    .option("--write-config <path>", "Write simple config with discovered pools")
+    .option(
+      "--write-config <path>",
+      "Write simple config with discovered pools",
+    )
     .action(async (opts: DiscoverCommandOptions) => {
       await runDiscoverCommand(opts);
     });
