@@ -1,4 +1,5 @@
 import type { Timeframe } from "../contracts/timeframe.js";
+import type { DexPoolSelectionMetadata } from "../simple/pool-selection-metadata.types.js";
 import type { DexPoolConfig } from "../types/dex-pool-dataset.types.js";
 
 export type DexBuildOutputConfig = {
@@ -10,6 +11,12 @@ export type DexBuildFinalityConfig =
   | { mode: "confirmation_lag"; confirmations: number }
   | { mode: "latest" };
 
+/**
+ * Legacy advanced config types.
+ *
+ * These are kept temporarily so old unregistered modules can still compile.
+ * They are not part of the public CLI surface.
+ */
 export type DexBuildNetworkConfig = {
   chain: string;
   chainId: number;
@@ -47,6 +54,12 @@ export type DexBuildConfig = {
 
 export type ResolvedDexBuildConfig = {
   datasetId: string;
+
+  /**
+   * Transitional report field.
+   *
+   * Public CLI uses runtime registry pools, not registry files.
+   */
   registryPath?: string;
 
   /**
@@ -59,10 +72,7 @@ export type ResolvedDexBuildConfig = {
    *
    * Keyed by pool.id.
    */
-  poolSelectionByPoolId?: Record<
-    string,
-    import("../simple/pool-selection-metadata.types.js").DexPoolSelectionMetadata
-  >;
+  poolSelectionByPoolId?: Record<string, DexPoolSelectionMetadata>;
 
   network: {
     chain: string;
@@ -98,6 +108,10 @@ export type ResolvedDexBuildConfig = {
   };
 
   output: DexBuildOutputConfig;
+
+  /**
+   * Kept temporarily for run-report compatibility.
+   */
   profile?: string;
 
   /**

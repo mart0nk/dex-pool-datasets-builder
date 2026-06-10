@@ -46,10 +46,10 @@ export function resolveDexBuildConfig(
     throw new Error(`CONFIG_RPC_ENV_MISSING:${config.network.rpcUrlEnv}`);
   }
 
-    return {
-      datasetId: config.datasetId,
-      registryPath: config.registry.path,
-      registryPools: [],
+  return {
+    datasetId: config.datasetId,
+    registryPath: config.registry.path,
+    registryPools: [],
     network: {
       chain: config.network.chain,
       chainId: config.network.chainId,

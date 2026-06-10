@@ -1,6 +1,6 @@
+import { readFile } from "node:fs/promises";
 import type { Command } from "commander";
 import type { Timeframe } from "../../contracts/timeframe.js";
-import { readFile } from "node:fs/promises";
 import type { ResolvedDexBuildConfig } from "../../config/dex-build-config.types.js";
 import {
   parsePairsList,
@@ -49,26 +49,18 @@ type BuildCommandOptions = {
 function formatQualityFailures(quality: DexPoolQualitySummary): string {
   const failures: string[] = [];
 
-  if (quality.reorgConflicts > 0) {
+  if (quality.reorgConflicts > 0)
     failures.push(`reorgConflicts: ${quality.reorgConflicts}`);
-  }
-
-  if (quality.invalidLogs > 0) {
+  if (quality.invalidLogs > 0)
     failures.push(`invalidLogs: ${quality.invalidLogs}`);
-  }
-
-  if (quality.duplicateLogs > 0) {
+  if (quality.duplicateLogs > 0)
     failures.push(`duplicateLogs: ${quality.duplicateLogs}`);
-  }
-
   if (quality.missingBlockTimestamps > 0) {
     failures.push(`missingBlockTimestamps: ${quality.missingBlockTimestamps}`);
   }
-
   if (quality.incompleteBlockRanges > 0) {
     failures.push(`incompleteBlockRanges: ${quality.incompleteBlockRanges}`);
   }
-
   if (quality.extremeWickCandles > 0) {
     failures.push(`extremeWickCandles: ${quality.extremeWickCandles}`);
   }
@@ -81,60 +73,48 @@ function printProgressEvent(event: DexBuildProgressEvent): void {
     case "build_start":
       printLine(`Starting build: ${event.datasetId}`);
       break;
-
     case "pool_start":
       printLine(`Processing pool ${event.poolId} (${event.poolAddress})`);
       break;
-
     case "logs_read_start":
       printLine(
         `Reading logs: ${event.chunks} chunks, blocks ${event.fromBlock} – ${event.toBlock}`,
       );
       break;
-
     case "logs_chunk_start":
       printLine(
         `Reading logs chunk ${event.index}/${event.total}: ${event.fromBlock} – ${event.toBlock}`,
       );
       break;
-
     case "logs_chunk_done":
       printLine(
         `Logs chunk ${event.index}/${event.total} done: ${event.logCount} logs`,
       );
       break;
-
     case "timestamps_progress":
       printLine(
         `Fetching timestamps: ${event.done}${event.total > 0 ? `/${event.total}` : ""} ` +
           `(cache hits=${event.cacheHits}, misses=${event.cacheMisses})`,
       );
       break;
-
     case "swaps_decoded":
       printLine(`Decoded swaps: ${event.swaps}`);
       break;
-
     case "candles_build_start":
       printLine(`Building ${event.timeframe} candles...`);
       break;
-
     case "candles_fill_done":
       printLine(`Filled no-trade intervals: ${event.filledNoTradeIntervals}`);
       break;
-
     case "timeframe_aggregate_done":
       printLine(`Aggregated ${event.timeframe}: ${event.candles} candles`);
       break;
-
     case "write_start":
       printLine(`Writing output for ${event.poolId}...`);
       break;
-
     case "write_done":
       printLine(`Wrote ${event.objects} objects for ${event.poolId}`);
       break;
-
     case "build_done":
       printLine(`Build ${event.status}: ${event.datasetId}`);
       break;
@@ -175,23 +155,17 @@ export function formatRunReport(
 
       if (pool.quality.passed) {
         lines.push(`   Quality: ${qualityLabel}`);
-
-        if (pool.quality.noTradeIntervals > 0) {
-          lines.push(
-            `   Filled no-trade intervals: ${pool.quality.noTradeIntervals}`,
-          );
-        }
       } else {
         const failures = formatQualityFailures(pool.quality);
         lines.push(
           `   Quality: ${qualityLabel}${failures ? ` (${failures})` : ""}`,
         );
+      }
 
-        if (pool.quality.noTradeIntervals > 0) {
-          lines.push(
-            `   Filled no-trade intervals: ${pool.quality.noTradeIntervals}`,
-          );
-        }
+      if (pool.quality.noTradeIntervals > 0) {
+        lines.push(
+          `   Filled no-trade intervals: ${pool.quality.noTradeIntervals}`,
+        );
       }
 
       if (pool.writtenObjects.length > 0) {
@@ -390,6 +364,11 @@ function simpleInputFromConfig(
   };
 }
 
+async function loadSimpleBuildConfig(path: string): Promise<unknown> {
+  const raw = await readFile(path, "utf8");
+  return JSON.parse(raw) as unknown;
+}
+
 function parseTimeframes(value: string | undefined): Timeframe[] | undefined {
   if (value === undefined) {
     return undefined;
@@ -462,11 +441,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-async function loadSimpleBuildConfig(path: string): Promise<unknown> {
-  const raw = await readFile(path, "utf8");
-  return JSON.parse(raw) as unknown;
-}
-
 function requiredString(value: unknown, field: string): string {
   if (typeof value !== "string" || value.length === 0) {
     throw new Error(`SIMPLE_CONFIG_FIELD_REQUIRED:${field}`);
@@ -522,27 +496,15 @@ export function registerBuildCommand(program: Command): void {
       "Comma-separated pair selectors, e.g. WETH/USDC,cbBTC/WETH:3000",
     )
     .option("--fee <fee>", "Uniswap v3 fee tier, e.g. 500")
-    .option(
-      "--token0 <address>",
-      "token0/tokenA address for factory.getPool",
-    )
-    .option(
-      "--token1 <address>",
-      "token1/tokenB address for factory.getPool",
-    )
+    .option("--token0 <address>", "token0/tokenA address for factory.getPool")
+    .option("--token1 <address>", "token1/tokenB address for factory.getPool")
     .option("--output <uri>", "Output URI override, local:// or s3://")
     .option("--json", "Output run report as JSON")
     .option("--verbose", "Verbose output")
     .option("--chain <chain>", "Chain, e.g. base")
     .option("--from <date>", "From date/time, e.g. 2024-01-01")
-    .option(
-      "--to <date>",
-      "Exclusive to date/time, e.g. 2024-02-01",
-    )
-    .option(
-      "--days <days>",
-      "Duration in days when --to is omitted",
-    )
+    .option("--to <date>", "Exclusive to date/time, e.g. 2024-02-01")
+    .option("--days <days>", "Duration in days when --to is omitted")
     .option("--rpc <url>", "Direct RPC URL")
     .option("--rpc-env <env>", "RPC environment variable name")
     .option("--out <pathOrUri>", "Output path or URI")

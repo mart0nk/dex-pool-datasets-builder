@@ -39,8 +39,9 @@ export async function buildDexPoolDataset(
     datasetId: options.datasetId,
   });
 
-  const { pools: registryPools, errors: registryErrors } =
-    validatePoolRegistry(options.registryPools);
+  const { pools: registryPools, errors: registryErrors } = validatePoolRegistry(
+    options.registryPools,
+  );
 
   const fatalErrors: DexBuildRunReport["fatalErrors"] = [];
 
