@@ -18,6 +18,7 @@ on-chain Swap logs
 ## Current scope
 
 - simple CLI mode for Uniswap v3-style pools
+- Uniswap v3 top-pool discovery through a configured subgraph
 - pair-based pool resolution via Uniswap v3 factory `getPool`
 - direct pool-address builds
 - token-address + fee pool resolution
@@ -84,8 +85,11 @@ Example `.env`:
 
 ```env
 BASE_RPC_URL=https://mainnet.base.org
+BASE_UNISWAP_V3_SUBGRAPH_URL=https://gateway.thegraph.com/api/YOUR_KEY/subgraphs/id/YOUR_BASE_UNISWAP_V3_SUBGRAPH_ID
 ETH_RPC_URL=https://your-ethereum-archive-rpc
+ETH_UNISWAP_V3_SUBGRAPH_URL=https://gateway.thegraph.com/api/YOUR_KEY/subgraphs/id/YOUR_ETH_UNISWAP_V3_SUBGRAPH_ID
 ARBITRUM_RPC_URL=https://your-arbitrum-archive-rpc
+ARBITRUM_UNISWAP_V3_SUBGRAPH_URL=https://gateway.thegraph.com/api/YOUR_KEY/subgraphs/id/YOUR_ARBITRUM_UNISWAP_V3_SUBGRAPH_ID
 POLYGON_RPC_URL=https://your-polygon-archive-rpc
 BSC_RPC_URL=https://your-bsc-archive-rpc
 ```
@@ -244,6 +248,50 @@ Example config:
 Both paths resolve into the same internal build plan.
 
 The older registry/profile/block-range config model is not part of the public CLI surface.
+
+---
+
+## Discover top pools
+
+Discover the top Uniswap v3 pools from a configured subgraph:
+
+```bash
+dex-pool discover \
+  --chain base \
+  --top 10 \
+  --by totalValueLockedUSD
+```
+
+Discovery uses `BASE_UNISWAP_V3_SUBGRAPH_URL` by default for Base. You can override it explicitly:
+
+```bash
+dex-pool discover \
+  --chain base \
+  --top 10 \
+  --subgraph-url-env BASE_UNISWAP_V3_SUBGRAPH_URL \
+  --json
+```
+
+Filter by fee tiers or pairs:
+
+```bash
+dex-pool discover \
+  --chain base \
+  --top 10 \
+  --include-fees 500,3000 \
+  --exclude-pairs USDC/USDbC
+```
+
+Write a simple build config from discovered canonical pool addresses:
+
+```bash
+dex-pool discover \
+  --chain base \
+  --top 10 \
+  --write-config dex-pool.config.json
+```
+
+The generated config uses `pools[]`, not `pairs[]`, because discovery has already resolved canonical pool contracts.
 
 ---
 
@@ -1129,6 +1177,7 @@ npm test
 npm run build
 node dist/cli/index.js --help
 node dist/cli/index.js build --help
+node dist/cli/index.js discover --help
 node dist/cli/index.js inspect --help
 node dist/cli/index.js doctor --help
 
@@ -1187,6 +1236,7 @@ npm run typecheck
 npm run build
 node dist/cli/index.js --help
 node dist/cli/index.js build --help
+node dist/cli/index.js discover --help
 node dist/cli/index.js inspect --help
 node dist/cli/index.js doctor --help
 npm test

@@ -7,6 +7,7 @@ import { registerBuildCommand } from "./commands/build.command.js";
 import { registerInspectCommand } from "./commands/inspect.command.js";
 import { registerDoctorCommand } from "./commands/doctor.command.js";
 import { registerInitCommand } from "./commands/init.command.js";
+import { registerDiscoverCommand } from "./commands/discover.command.js";
 
 const program = new Command();
 
@@ -16,6 +17,7 @@ program
   .version("0.1.0");
 
 registerBuildCommand(program);
+registerDiscoverCommand(program);
 registerInspectCommand(program);
 registerDoctorCommand(program);
 registerInitCommand(program);
