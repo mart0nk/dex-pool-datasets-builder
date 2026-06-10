@@ -118,17 +118,18 @@ export function createEvmJsonRpcClient(
           signal: controller.signal,
         });
 
-        const text = await response.text();
-
         if (!response.ok) {
+          const text = await readResponseTextSafely(response);
           const error = new RetryableRpcError(
             `EVM_RPC_HTTP_ERROR:${response.status}:${text}`,
-            isRetryableHttpStatus(response.status) || isRateLimitText(text),
+            text !== "<body_unavailable>" &&
+              (isRetryableHttpStatus(response.status) || isRateLimitText(text)),
           );
 
           throw error;
         }
 
+        const text = await response.text();
         const json = JSON.parse(text) as {
           id?: number;
           result?: T;
@@ -342,6 +343,12 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
   });
+}
+
+async function readResponseTextSafely(response: {
+  text: () => Promise<string>;
+}): Promise<string> {
+  return response.text().catch(() => "<body_unavailable>");
 }
 
 const defaultFetch: EvmRpcFetch = async (url, init) => {

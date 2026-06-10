@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Timeframe } from "../contracts/timeframe.js";
 import { getTimeframeMs } from "../contracts/timeframe.js";
@@ -40,12 +39,8 @@ export async function buildDexPoolDataset(
     datasetId: options.datasetId,
   });
 
-  const registryInput: unknown =
-    options.registryPools ??
-    JSON.parse(await readFile(options.registryPath, "utf8"));
-
   const { pools: registryPools, errors: registryErrors } =
-    validatePoolRegistry(registryInput);
+    validatePoolRegistry(options.registryPools);
 
   const fatalErrors: DexBuildRunReport["fatalErrors"] = [];
 
@@ -337,7 +332,7 @@ export async function buildDexPoolDataset(
     status,
     config: {
       profile: options.profile,
-      registryPath: options.registryPath,
+      registryPath: options.registryPath ?? "<runtime:simple>",
       outputUri: options.output.uri,
       selectedPools: options.build.pools,
     },

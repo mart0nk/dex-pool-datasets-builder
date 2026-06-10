@@ -1,11 +1,7 @@
 import type { Command } from "commander";
 import type { Timeframe } from "../../contracts/timeframe.js";
-import { loadDexBuildConfig } from "../../config/load-dex-build-config.js";
-import { resolveDexBuildConfig } from "../../config/resolve-dex-build-config.js";
-import type {
-  DexBuildConfig,
-  ResolvedDexBuildConfig,
-} from "../../config/dex-build-config.types.js";
+import { readFile } from "node:fs/promises";
+import type { ResolvedDexBuildConfig } from "../../config/dex-build-config.types.js";
 import {
   parsePairsList,
   parsePoolsList,
@@ -24,7 +20,6 @@ import { printLine, printError, printJson } from "../cli-output.js";
 
 type BuildCommandOptions = {
   config?: string;
-  profile?: string;
   pool?: string;
   pools?: string;
   pair?: string;
@@ -253,19 +248,14 @@ export async function runBuildCommand(
     process.exit(1);
   }
 
+  let runReport: DexBuildRunReport;
+  let status: "completed" | "failed";
+
   try {
-    const { runReport, status } = await buildDexPoolDataset(resolved, {
+    ({ runReport, status } = await buildDexPoolDataset(resolved, {
       onProgress:
         verbose === true && json !== true ? printProgressEvent : undefined,
-    });
-
-    if (json === true) {
-      printJson(runReport);
-    } else {
-      printLine(formatRunReport(runReport, verbose === true));
-    }
-
-    process.exit(status === "completed" ? 0 : 1);
+    }));
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
 
@@ -277,6 +267,14 @@ export async function runBuildCommand(
 
     process.exit(1);
   }
+
+  if (json === true) {
+    printJson(runReport);
+  } else {
+    printLine(formatRunReport(runReport, verbose === true));
+  }
+
+  process.exit(status === "completed" ? 0 : 1);
 }
 
 async function resolveBuildConfigFromFile(
@@ -286,28 +284,7 @@ async function resolveBuildConfigFromFile(
     throw new Error("CONFIG_PATH_REQUIRED");
   }
 
-  const rawConfig = (await loadDexBuildConfig(options.config)) as unknown;
-
-  if (isAdvancedDexBuildConfig(rawConfig)) {
-    const resolved = resolveDexBuildConfig({
-      config: rawConfig,
-      profile: options.profile,
-      outputOverride: options.output,
-    });
-
-    if (options.pool !== undefined) {
-      if (!resolved.build.pools.includes(options.pool)) {
-        throw new Error(
-          `POOL_NOT_FOUND_IN_CONFIG:${options.pool}:${resolved.build.pools.join(",")}`,
-        );
-      }
-
-      resolved.build.pools = [options.pool];
-    }
-
-    return resolved;
-  }
-
+  const rawConfig = await loadSimpleBuildConfig(options.config);
   return resolveSimpleDexBuildConfig(simpleInputFromConfig(rawConfig, options));
 }
 
@@ -481,19 +458,13 @@ function parseSymbolsConfig(
   });
 }
 
-function isAdvancedDexBuildConfig(value: unknown): value is DexBuildConfig {
-  return (
-    isRecord(value) &&
-    typeof value.datasetId === "string" &&
-    isRecord(value.registry) &&
-    isRecord(value.network) &&
-    isRecord(value.build) &&
-    isRecord(value.output)
-  );
-}
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+async function loadSimpleBuildConfig(path: string): Promise<unknown> {
+  const raw = await readFile(path, "utf8");
+  return JSON.parse(raw) as unknown;
 }
 
 function requiredString(value: unknown, field: string): string {
@@ -540,45 +511,41 @@ export function registerBuildCommand(program: Command): void {
   program
     .command("build")
     .description(
-      "Build DEX pool dataset. Use --config for config mode, or --chain/--pair/--from/--to for simple mode.",
+      "Build DEX pool dataset from simple CLI flags or dex-pool.config.json.",
     )
-    .option("-c, --config <path>", "Path to config file")
-    .option("--profile <profile>", "Advanced config profile to use")
-    .option(
-      "--pool <pool>",
-      "Simple mode pool address, or advanced mode pool ID",
-    )
-    .option("--pools <list>", "Comma-separated simple mode pool addresses")
-    .option("--pair <pair>", "Simple mode pair selector, e.g. WETH/USDC")
+    .option("-c, --config <path>", "Path to dex-pool.config.json")
+    .option("--pool <address>", "Pool contract address")
+    .option("--pools <list>", "Comma-separated pool contract addresses")
+    .option("--pair <pair>", "Pair selector, e.g. WETH/USDC")
     .option(
       "--pairs <list>",
       "Comma-separated pair selectors, e.g. WETH/USDC,cbBTC/WETH:3000",
     )
-    .option("--fee <fee>", "Simple mode Uniswap v3 fee tier, e.g. 500")
+    .option("--fee <fee>", "Uniswap v3 fee tier, e.g. 500")
     .option(
       "--token0 <address>",
-      "Simple mode token0/tokenA address for factory.getPool",
+      "token0/tokenA address for factory.getPool",
     )
     .option(
       "--token1 <address>",
-      "Simple mode token1/tokenB address for factory.getPool",
+      "token1/tokenB address for factory.getPool",
     )
     .option("--output <uri>", "Output URI override, local:// or s3://")
     .option("--json", "Output run report as JSON")
     .option("--verbose", "Verbose output")
-    .option("--chain <chain>", "Simple mode chain, e.g. base")
-    .option("--from <date>", "Simple mode from date/time, e.g. 2024-01-01")
+    .option("--chain <chain>", "Chain, e.g. base")
+    .option("--from <date>", "From date/time, e.g. 2024-01-01")
     .option(
       "--to <date>",
-      "Simple mode exclusive to date/time, e.g. 2024-02-01",
+      "Exclusive to date/time, e.g. 2024-02-01",
     )
     .option(
       "--days <days>",
-      "Simple mode duration in days when --to is omitted",
+      "Duration in days when --to is omitted",
     )
-    .option("--rpc <url>", "Simple mode direct RPC URL")
-    .option("--rpc-env <env>", "Simple mode RPC environment variable name")
-    .option("--out <pathOrUri>", "Simple mode output path or URI")
+    .option("--rpc <url>", "Direct RPC URL")
+    .option("--rpc-env <env>", "RPC environment variable name")
+    .option("--out <pathOrUri>", "Output path or URI")
     .option("--base <symbolOrAddress>", "Base token selector, e.g. WETH")
     .option("--quote <symbolOrAddress>", "Quote token selector, e.g. USDC")
     .option(

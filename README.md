@@ -1,4 +1,4 @@
-# @dex-pool-datasets
+# @trader-agent/dex-pool-datasets
 
 Builds audit-friendly DEX pool candle datasets from on-chain pool events and exports replay-compatible JSONL datasets for walk-forward diagnostics.
 
@@ -22,7 +22,7 @@ on-chain Swap logs
 - direct pool-address builds
 - token-address + fee pool resolution
 - curated token/pair presets for common liquid pairs
-- pool registry validation for advanced mode
+- runtime pool registry construction for selected pools
 - EVM block range planning
 - date range to block range resolution
 - EVM JSON-RPC `eth_getLogs` reads
@@ -202,6 +202,48 @@ dex-pool build \
   --to 2024-01-02 \
   --verbose
 ```
+
+---
+
+## Configuration model
+
+`dex-pool` uses a single simple configuration model.
+
+You can provide that model directly as CLI flags:
+
+```bash
+dex-pool build \
+  --chain base \
+  --pairs WETH/USDC,cbBTC/WETH:3000 \
+  --from 2024-01-01 \
+  --to 2024-01-02 \
+  --dataset-id base-two-pairs
+```
+
+Or through `dex-pool.config.json`:
+
+```bash
+dex-pool build --config dex-pool.config.json
+```
+
+Example config:
+
+```json
+{
+  "chain": "base",
+  "rpc": "env:BASE_RPC_URL",
+  "pairs": ["WETH/USDC", "cbBTC/WETH:3000"],
+  "from": "2024-01-01",
+  "to": "2024-01-02",
+  "datasetId": "base-two-pairs",
+  "timeframes": ["1m", "5m", "15m", "1h", "4h"],
+  "out": "./data/dex-pool-datasets"
+}
+```
+
+Both paths resolve into the same internal build plan.
+
+The older registry/profile/block-range config model is not part of the public CLI surface.
 
 ---
 
@@ -779,46 +821,6 @@ dex-pool build \
 
 ---
 
-## Advanced config mode
-
-The original advanced workflow is still supported.
-
-Validate advanced config:
-
-```bash
-dex-pool validate \
-  --config config/dex-dataset.config.example.json \
-  --profile local
-```
-
-Plan advanced config:
-
-```bash
-dex-pool plan \
-  --config config/dex-dataset.config.example.json \
-  --profile local \
-  --json
-```
-
-Build advanced config:
-
-```bash
-dex-pool build \
-  --config config/dex-dataset.config.example.json \
-  --profile local \
-  --verbose
-```
-
-Use advanced mode for:
-
-- explicit pool registry files
-- multi-pool datasets
-- pinned block ranges
-- S3 output
-- profile-based production builds
-
----
-
 ## S3 output
 
 Use an S3 URI:
@@ -1121,9 +1123,14 @@ head -n 3 .data/cache/base/block-timestamps.jsonl
 Before opening a PR:
 
 ```bash
+git status --short
 npm run typecheck
 npm test
 npm run build
+node dist/cli/index.js --help
+node dist/cli/index.js build --help
+node dist/cli/index.js inspect --help
+node dist/cli/index.js doctor --help
 
 dex-pool doctor --chain base
 
@@ -1144,6 +1151,15 @@ dex-pool build \
 cat ./data/dex-pool-datasets/pr-smoke-weth-usdc/*/manifest.json | jq '.poolSelection, .blockRange'
 ```
 
+Generated runtime artifacts should not appear in `git status`:
+
+- `.data/`
+- `data/`
+- `dist/`
+- `node_modules/`
+- `dex-pool.config.json`
+- `.env`
+
 Expected build output:
 
 ```text
@@ -1161,11 +1177,28 @@ Pools:
 
 ---
 
+## CI checks
+
+The CI workflow runs:
+
+```bash
+npm ci
+npm run typecheck
+npm run build
+node dist/cli/index.js --help
+node dist/cli/index.js build --help
+node dist/cli/index.js inspect --help
+node dist/cli/index.js doctor --help
+npm test
+```
+
+---
+
 ## Recommended commit message
 
 ```bash
 git add .
 
-git commit -m "feat: improve DEX pool build observability" \
-  -m "Add verbose progress logging, persistent block timestamp caching, pool selection audit metadata, additional Base token and pair presets, local CLI usage docs, and production RPC guidance."
+git commit -m "feat: stabilize simple DEX pool CLI for main" \
+  -m "Prepare feat/simplifyed-mode for public main by preserving advanced config mode, stabilizing simple build/inspect/doctor/init commands, cleaning runtime artifacts, hardening RPC and timestamp cache behavior, refreshing docs, and adding CI checks."
 ```

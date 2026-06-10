@@ -134,7 +134,22 @@ export async function readUniswapV3PoolSwapsWithQuality(
     }
 
     for (const log of logs) {
-      const logKey = `${log.transactionHash}:${log.logIndex}`;
+      let identity: CanonicalLogIdentity;
+
+      try {
+        identity = canonicalLogIdentity(log);
+      } catch (error) {
+        quality.invalidLogs += 1;
+        quality.passed = false;
+
+        if (failFast) {
+          throw error;
+        }
+
+        continue;
+      }
+
+      const logKey = `${identity.transactionHash}:${identity.logIndex}`;
 
       if (seenLogs.has(logKey)) {
         quality.duplicateLogs += 1;
@@ -149,7 +164,7 @@ export async function readUniswapV3PoolSwapsWithQuality(
 
       seenLogs.add(logKey);
 
-      const blockNumber = hexToBigInt(log.blockNumber);
+      const blockNumber = identity.blockNumber;
       const previousHash = seenBlockHashes.get(blockNumber.toString());
 
       if (previousHash !== undefined && previousHash !== log.blockHash) {
@@ -179,7 +194,7 @@ export async function readUniswapV3PoolSwapsWithQuality(
 
           if (failFast) {
             throw new Error(
-              `DEX_BLOCK_HASH_MISMATCH:${blockNumber.toString()}:${timestampRecord.hash}:${log.blockHash}`,
+              `EVM_REORG_CONFLICT:${blockNumber.toString()}:${timestampRecord.hash}:${log.blockHash}`,
             );
           }
 
@@ -270,4 +285,35 @@ export async function readUniswapV3PoolSwapsWithQuality(
     swaps,
     quality,
   };
+}
+
+type CanonicalLogIdentity = {
+  transactionHash: string;
+  blockNumber: bigint;
+  transactionIndex: number;
+  logIndex: number;
+};
+
+function canonicalLogIdentity(log: EvmLog): CanonicalLogIdentity {
+  const transactionHash = log.transactionHash.toLowerCase();
+  if (!/^0x[a-f0-9]{64}$/.test(transactionHash)) {
+    throw new Error(`EVM_LOG_TRANSACTION_HASH_INVALID:${log.transactionHash}`);
+  }
+
+  return {
+    transactionHash,
+    blockNumber: hexToBigInt(log.blockNumber),
+    transactionIndex: hexToNumber(log.transactionIndex),
+    logIndex: hexToNumber(log.logIndex),
+  };
+}
+
+export async function readUniswapV3PoolSwaps(
+  options: ReadUniswapV3PoolSwapsWithQualityOptions,
+): Promise<NormalizedPoolSwap[]> {
+  const { swaps } = await readUniswapV3PoolSwapsWithQuality({
+    ...options,
+    failFast: true,
+  });
+  return swaps;
 }

@@ -47,12 +47,12 @@ export type DexBuildConfig = {
 
 export type ResolvedDexBuildConfig = {
   datasetId: string;
-  registryPath: string;
+  registryPath?: string;
 
   /**
-   * Runtime registry entries used by simple mode.
+   * Runtime registry entries used by the unified simple CLI.
    */
-  registryPools?: DexPoolConfig[];
+  registryPools: DexPoolConfig[];
 
   /**
    * Audit metadata for how each pool was selected.

@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -23,7 +23,6 @@ import { resolveDatasetStorage } from '../../src/storage/resolve-dataset-storage
 const mockReader = vi.mocked(readUniswapV3PoolSwapsWithQuality);
 const mockResolveStorage = vi.mocked(resolveDatasetStorage);
 
-// Registry on disk — base pool
 const REGISTRY_PATH = new URL('../../config/dex-pools.base.example.json', import.meta.url).pathname;
 const POOL_ID = 'base-uniswap-v3-weth-usdc-005';
 
@@ -67,10 +66,11 @@ function makeQuality(overrides: Partial<DexPoolQualitySummary> = {}): DexPoolQua
   };
 }
 
-function makeConfig(overrides: Partial<ResolvedDexBuildConfig['build']> = {}): ResolvedDexBuildConfig {
+async function makeConfig(overrides: Partial<ResolvedDexBuildConfig['build']> = {}): Promise<ResolvedDexBuildConfig> {
+  const registryPools = JSON.parse(await readFile(REGISTRY_PATH, 'utf8')) as ResolvedDexBuildConfig['registryPools'];
   return {
     datasetId: 'test-dataset',
-    registryPath: REGISTRY_PATH,
+    registryPools,
     network: {
       chain: 'base',
       chainId: 8453,
@@ -120,7 +120,7 @@ describe('buildDexPoolDataset', () => {
     ];
     mockReader.mockResolvedValue({ swaps, quality: makeQuality() });
 
-    const result = await buildDexPoolDataset(makeConfig());
+    const result = await buildDexPoolDataset(await makeConfig());
 
     expect(result.status).toBe('completed');
     expect(result.runReport.pools).toHaveLength(1);
@@ -145,7 +145,7 @@ describe('buildDexPoolDataset', () => {
     const quality = makeQuality({ reorgConflicts: 2, passed: false });
     mockReader.mockResolvedValue({ swaps, quality });
 
-    const result = await buildDexPoolDataset(makeConfig());
+    const result = await buildDexPoolDataset(await makeConfig());
 
     expect(result.runReport.pools[0]?.quality.reorgConflicts).toBe(2);
     expect(result.runReport.pools[0]?.quality.passed).toBe(false);
@@ -162,7 +162,7 @@ describe('buildDexPoolDataset', () => {
     ];
     mockReader.mockResolvedValue({ swaps, quality: makeQuality({ passed: false }) });
 
-    const result = await buildDexPoolDataset(makeConfig());
+    const result = await buildDexPoolDataset(await makeConfig());
 
     // Failed quality is recorded but is not a fatal error — the run itself completes
     expect(result.status).toBe('completed');
@@ -181,7 +181,7 @@ describe('buildDexPoolDataset', () => {
     ];
     mockReader.mockResolvedValue({ swaps, quality: makeQuality() });
 
-    const result = await buildDexPoolDataset(makeConfig({
+    const result = await buildDexPoolDataset(await makeConfig({
       timeframes: ['1m', '5m', '15m'],
     }));
 
@@ -200,7 +200,7 @@ describe('buildDexPoolDataset', () => {
     mockReader.mockResolvedValue({ swaps: [], quality: makeQuality() });
 
     const result = await buildDexPoolDataset(
-      makeConfig({ pools: ['nonexistent-pool'] })
+      await makeConfig({ pools: ['nonexistent-pool'] })
     );
 
     expect(result.status).toBe('failed');
@@ -222,7 +222,7 @@ describe('buildDexPoolDataset', () => {
     ];
     mockReader.mockResolvedValue({ swaps, quality: makeQuality() });
 
-    const result = await buildDexPoolDataset(makeConfig({
+    const result = await buildDexPoolDataset(await makeConfig({
       timeframes: ['1m', '5m'],
     }));
 
@@ -240,10 +240,27 @@ describe('buildDexPoolDataset', () => {
     ];
     mockReader.mockResolvedValue({ swaps, quality: makeQuality() });
 
-    await buildDexPoolDataset(makeConfig());
+    await buildDexPoolDataset(await makeConfig());
 
     // Verify run-report.json was written to storage
     const exists = await storage.exists?.('test-dataset/run-report.json');
     expect(exists).toBe(true);
+  });
+
+  it('uses runtime registryPools and writes runtime registry source in run report', async () => {
+    const dir = await makeTempDir();
+    const storage = new LocalDatasetStorage(dir);
+    mockResolveStorage.mockReturnValue(storage);
+
+    const swaps = [
+      makeSwap(BASE_TIMESTAMP, 1),
+      makeSwap(SECOND_SWAP_TIMESTAMP, 1, 11n),
+    ];
+    mockReader.mockResolvedValue({ swaps, quality: makeQuality() });
+
+    const result = await buildDexPoolDataset(await makeConfig());
+
+    expect(result.status).toBe('completed');
+    expect(result.runReport.config.registryPath).toBe('<runtime:simple>');
   });
 });

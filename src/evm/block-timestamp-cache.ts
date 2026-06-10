@@ -34,8 +34,38 @@ export class BlockTimestampCache {
   ) {}
 
   async getTimestamp(blockNumber: bigint): Promise<number> {
-    const record = await this.getBlockTimestamp(blockNumber);
-    return record.timestamp;
+    await this.loadPersistentIfNeeded();
+
+    const key = blockNumber.toString();
+    const cached = this.timestamps.get(key);
+
+    if (cached !== undefined && isValidBlockHash(cached.hash)) {
+      this.cacheHits += 1;
+      return cached.timestamp;
+    }
+
+    if (cached !== undefined) {
+      this.timestamps.delete(key);
+    }
+
+    this.cacheMisses += 1;
+
+    const block = await this.client.getBlockByNumber(blockNumber);
+    const timestamp = parseBlockTimestamp(block.timestamp, blockNumber);
+
+    const record: CachedBlockTimestamp = {
+      hash: block.hash,
+      timestamp,
+    };
+
+    this.evictIfNeeded();
+    this.timestamps.set(key, record);
+
+    if (isValidBlockHash(block.hash)) {
+      await this.appendPersistent(blockNumber, record);
+    }
+
+    return timestamp;
   }
 
   async getBlockTimestamp(blockNumber: bigint): Promise<CachedBlockTimestamp> {
