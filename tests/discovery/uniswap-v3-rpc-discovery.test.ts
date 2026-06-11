@@ -55,30 +55,19 @@ describe("Uniswap v3 RPC discovery", () => {
     );
 
     expect(decoded).toEqual({
+      blockNumber: "1371680",
+      blockHash: "0x".padEnd(66, "2"),
+      transactionHash: "0x".padEnd(66, "3"),
+      logIndex: "0",
       token0: WETH.toLowerCase(),
       token1: USDC.toLowerCase(),
-      feeTier: 500,
-      poolAddress: POOL_A.toLowerCase(),
+      fee: 500,
+      tickSpacing: 10,
+      pool: POOL_A.toLowerCase(),
     });
   });
 
-  it("scans PoolCreated from the factory deployment block and ranks by swapCount", async () => {
-    const poolCreatedLogs = [
-        poolCreatedLog({
-          token0: WETH,
-          token1: USDC,
-          fee: 500,
-          pool: POOL_A,
-          blockNumber: 1_371_680n,
-        }),
-        poolCreatedLog({
-          token0: CBBTC,
-          token1: WETH,
-          fee: 3000,
-          pool: POOL_B,
-          blockNumber: 1_371_681n,
-        }),
-      ];
+  it("ranks cached candidates by swapCount without scanning factory history", async () => {
     const swapLogs = [
         swapLog({ pool: POOL_A, amount0: 1n, amount1: -2n }),
         swapLog({ pool: POOL_B, amount0: 1n, amount1: -2n }),
@@ -86,10 +75,6 @@ describe("Uniswap v3 RPC discovery", () => {
       ];
     let returnedSwapLogs = false;
     const getLogs = vi.fn(async (input) => {
-      if (input.topics?.[0] === UNISWAP_V3_POOL_CREATED_TOPIC) {
-        return input.fromBlock === 1_371_680n ? poolCreatedLogs : [];
-      }
-
       if (!returnedSwapLogs) {
         returnedSwapLogs = true;
         return swapLogs;
@@ -126,14 +111,28 @@ describe("Uniswap v3 RPC discovery", () => {
       source: "uniswap_v3_rpc",
       chain: "base",
       rpcUrl: "https://base-rpc.example",
+      candidates: [
+        {
+          token0: WETH.toLowerCase() as `0x${string}`,
+          token1: USDC.toLowerCase() as `0x${string}`,
+          feeTier: 500,
+          poolAddress: POOL_A.toLowerCase() as `0x${string}`,
+        },
+        {
+          token0: CBBTC.toLowerCase() as `0x${string}`,
+          token1: WETH.toLowerCase() as `0x${string}`,
+          feeTier: 3000,
+          poolAddress: POOL_B.toLowerCase() as `0x${string}`,
+        },
+      ],
       top: { by: "swapCount", limit: 1, lookbackDays: 7 },
     });
 
-    expect(getLogs.mock.calls[0]![0]).toMatchObject({
-      address: FACTORY,
-      fromBlock: 1_371_680n,
-      topics: [UNISWAP_V3_POOL_CREATED_TOPIC],
-    });
+    expect(
+      getLogs.mock.calls.some(
+        ([input]) => input.topics?.[0] === UNISWAP_V3_POOL_CREATED_TOPIC,
+      ),
+    ).toBe(false);
     const swapCall = getLogs.mock.calls.find(
       ([input]) => input.topics?.[0] === UNISWAP_V3_SWAP_TOPIC,
     )?.[0];
@@ -149,32 +148,12 @@ describe("Uniswap v3 RPC discovery", () => {
   });
 
   it("filters quote-token pools and ranks by quoteVolume", async () => {
-    const poolCreatedLogs = [
-        poolCreatedLog({
-          token0: WETH,
-          token1: USDC,
-          fee: 500,
-          pool: POOL_A,
-          blockNumber: 1_371_680n,
-        }),
-        poolCreatedLog({
-          token0: CBBTC,
-          token1: WETH,
-          fee: 3000,
-          pool: POOL_B,
-          blockNumber: 1_371_681n,
-        }),
-      ];
     const swapLogs = [
         swapLog({ pool: POOL_A, amount0: 1n, amount1: -1_250_000n }),
         swapLog({ pool: POOL_A, amount0: 2n, amount1: 2_500_000n }),
       ];
     let returnedSwapLogs = false;
     const getLogs = vi.fn(async (input) => {
-      if (input.topics?.[0] === UNISWAP_V3_POOL_CREATED_TOPIC) {
-        return input.fromBlock === 1_371_680n ? poolCreatedLogs : [];
-      }
-
       if (!returnedSwapLogs) {
         returnedSwapLogs = true;
         return swapLogs;
@@ -201,6 +180,20 @@ describe("Uniswap v3 RPC discovery", () => {
       source: "uniswap_v3_rpc",
       chain: "base",
       rpcUrl: "https://base-rpc.example",
+      candidates: [
+        {
+          token0: WETH.toLowerCase() as `0x${string}`,
+          token1: USDC.toLowerCase() as `0x${string}`,
+          feeTier: 500,
+          poolAddress: POOL_A.toLowerCase() as `0x${string}`,
+        },
+        {
+          token0: CBBTC.toLowerCase() as `0x${string}`,
+          token1: WETH.toLowerCase() as `0x${string}`,
+          feeTier: 3000,
+          poolAddress: POOL_B.toLowerCase() as `0x${string}`,
+        },
+      ],
       top: { by: "quoteVolume", limit: 10, lookbackDays: 7 },
       quote: "USDC",
     });

@@ -19,6 +19,7 @@ on-chain Swap logs
 
 - simple CLI mode for Uniswap v3-style pools
 - RPC-backed Uniswap v3 active-pool discovery
+- explicit local discovery cache for Uniswap v3 `PoolCreated` events
 - pair-based pool resolution via Uniswap v3 factory `getPool`
 - direct pool-address builds
 - token-address + fee pool resolution
@@ -250,7 +251,41 @@ The older registry/profile/block-range config model is not part of the public CL
 
 ## Discover top pools
 
-Discover the most active Uniswap v3 pools from recent RPC logs:
+Discovery is RPC-backed and uses two phases:
+
+1. Cache the Uniswap v3 factory `PoolCreated` universe locally.
+2. Score cached candidate pools from recent `Swap` logs.
+
+This keeps expensive historical factory scans explicit. `dex-pool discover` requires an initialized cache unless `--init-cache` is provided.
+
+Initialize the local discovery cache:
+
+```bash
+dex-pool discover-cache init --chain base
+```
+
+Check cache status:
+
+```bash
+dex-pool discover-cache status --chain base
+```
+
+Refresh the cache later:
+
+```bash
+dex-pool discover-cache refresh --chain base
+```
+
+Cache files are local runtime artifacts:
+
+```text
+.data/cache/<chain>/uniswap-v3-pools.jsonl
+.data/cache/<chain>/uniswap-v3-pools.state.json
+```
+
+The state file is versioned and records the chain, factory address, deployment block, scanned block, safe latest block, pool count, and update timestamp. Pool rows include block/log identity, token addresses, fee tier, tick spacing, and canonical pool address.
+
+After cache initialization, discover the most active Uniswap v3 pools from recent RPC logs:
 
 ```bash
 dex-pool discover \
@@ -260,9 +295,26 @@ dex-pool discover \
 
 Default discovery ranks by swap count over the last 7 days and uses only the chain RPC URL, such as `BASE_RPC_URL`.
 
+For first-run convenience, initialize a missing cache and then score:
+
+```bash
+dex-pool discover \
+  --chain base \
+  --top 10 \
+  --init-cache
+```
+
+`--init-cache` only initializes when the cache is missing. It does not wipe or rebuild an existing cache.
+
 Expected output:
 
 ```text
+Loaded discovery cache for base:
+  pools: 18432
+  scannedToBlock: 23890500
+
+Scoring recent Swap logs over last 7 days...
+
 Top active Uniswap v3 pools by swapCount over last 7 days
 
 Rank  Pair        Fee   Swaps  Pool
@@ -1185,6 +1237,7 @@ npm run build
 node dist/cli/index.js --help
 node dist/cli/index.js build --help
 node dist/cli/index.js discover --help
+node dist/cli/index.js discover-cache --help
 node dist/cli/index.js inspect --help
 node dist/cli/index.js doctor --help
 
@@ -1244,6 +1297,7 @@ npm run build
 node dist/cli/index.js --help
 node dist/cli/index.js build --help
 node dist/cli/index.js discover --help
+node dist/cli/index.js discover-cache --help
 node dist/cli/index.js inspect --help
 node dist/cli/index.js doctor --help
 npm test

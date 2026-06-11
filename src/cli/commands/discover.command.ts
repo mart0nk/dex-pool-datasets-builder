@@ -5,6 +5,13 @@ import {
   discoverTopUniswapV3Pools,
   normalizeDiscoveryMetric,
 } from "../../discovery/uniswap-v3-rpc-discovery.js";
+import {
+  discoveryCacheExists,
+  getDiscoveryCacheStatus,
+  initializeDiscoveryCache,
+  isDiscoveryCacheMissingError,
+  loadDiscoveryCache,
+} from "../../discovery/uniswap-v3-factory-pool-cache.js";
 import { getSimpleChainPreset } from "../../simple/chain-presets.js";
 import { resolveSimpleRpcUrl } from "../../simple/resolve-simple-build-config.js";
 import type { DexChain } from "../../types/dex-pool-dataset.types.js";
@@ -16,6 +23,7 @@ type DiscoverCommandOptions = {
   by?: string;
   lookbackDays?: string;
   quote?: string;
+  initCache?: boolean;
   json?: boolean;
   writeConfig?: string;
 };
@@ -27,6 +35,8 @@ export async function runDiscoverCommand(
   let metric: DiscoveryMetric;
   let lookbackDays: number;
   let pools: Awaited<ReturnType<typeof discoverTopUniswapV3Pools>>;
+  let cache: Awaited<ReturnType<typeof loadDiscoveryCache>>;
+  let cacheLagBlocks: bigint | undefined;
 
   try {
     chain = normalizeChain(options.chain);
@@ -44,10 +54,29 @@ export async function runDiscoverCommand(
 
     const top = parsePositiveInteger(options.top ?? "10", "top");
     const rpcUrl = resolveSimpleRpcUrl({ chain });
+    const cacheExists = await discoveryCacheExists({ chain });
+
+    if (!cacheExists && options.initCache === true) {
+      await initializeDiscoveryCache({ chain, rpcUrl });
+    }
+
+    try {
+      cache = await loadDiscoveryCache({ chain });
+    } catch (error: unknown) {
+      if (isDiscoveryCacheMissingError(error)) {
+        throw new Error(formatCacheMissingError(chain, top));
+      }
+
+      throw error;
+    }
+
+    const status = await getDiscoveryCacheStatus({ chain, rpcUrl });
+    cacheLagBlocks = status.lagBlocks;
     pools = await discoverTopUniswapV3Pools({
       source: "uniswap_v3_rpc",
       chain,
       rpcUrl,
+      candidates: cache.candidates,
       top: {
         by: metric,
         limit: top,
@@ -82,8 +111,8 @@ export async function runDiscoverCommand(
       metric,
       lookbackDays,
       quote: options.quote,
-      factoryAddress: pools[0]?.discovery.factoryAddress,
-      factoryDeploymentBlock: pools[0]?.discovery.factoryDeploymentBlock,
+      factoryAddress: cache.state.factoryAddress,
+      factoryDeploymentBlock: cache.state.deploymentBlock,
       blockRange:
         pools[0] !== undefined
           ? {
@@ -95,6 +124,16 @@ export async function runDiscoverCommand(
       pools,
     });
   } else {
+    if (cacheLagBlocks !== undefined && cacheLagBlocks > 10_000n) {
+      printError(
+        `Discovery cache is ${cacheLagBlocks.toString()} blocks behind latest safe block. Run: dex-pool discover-cache refresh --chain ${chain}`,
+      );
+    }
+
+    printLine(
+      `Loaded discovery cache for ${chain}:\n  pools: ${cache.rows.length}\n  scannedToBlock: ${cache.state.scannedToBlock}\n`,
+    );
+    printLine(`Scoring recent Swap logs over last ${lookbackDays} days...\n`);
     printLine(
       formatDiscoveredPoolsTable({
         pools,
@@ -219,9 +258,20 @@ export function registerDiscoverCommand(program: Command): void {
       "--quote <symbol>",
       "Quote token used for quoteVolume, e.g. USDC.",
     )
+    .option("--init-cache", "Initialize missing discovery cache before scoring")
     .option("--json", "Output JSON")
     .option("--write-config <path>", "Write simple config with discovered pools")
     .action(async (opts: DiscoverCommandOptions) => {
       await runDiscoverCommand(opts);
     });
+}
+
+function formatCacheMissingError(chain: DexChain, top: number): string {
+  return (
+    `DISCOVERY_CACHE_MISSING:${chain}\n\n` +
+    "Initialize the Uniswap v3 discovery cache first:\n" +
+    `  dex-pool discover-cache init --chain ${chain}\n\n` +
+    "Or run discovery with:\n" +
+    `  dex-pool discover --chain ${chain} --top ${top} --init-cache`
+  );
 }
