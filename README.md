@@ -18,7 +18,7 @@ on-chain Swap logs
 ## Current scope
 
 - simple CLI mode for Uniswap v3-style pools
-- Uniswap v3 top-pool discovery through a configured subgraph
+- RPC-backed Uniswap v3 active-pool discovery
 - pair-based pool resolution via Uniswap v3 factory `getPool`
 - direct pool-address builds
 - token-address + fee pool resolution
@@ -49,7 +49,7 @@ on-chain Swap logs
 - checkpointed/resumable backfills
 - HTTP service orchestration
 - hosted API service
-- automatic liquidity ranking across all pools
+- automatic liquidity/TVL/USD-volume ranking across all pools
 - automatic discovery of all pools for a token pair
 - full production scheduler/orchestrator
 - full independent pool identity verification beyond Uniswap v3-style metadata/factory resolution
@@ -85,11 +85,8 @@ Example `.env`:
 
 ```env
 BASE_RPC_URL=https://mainnet.base.org
-BASE_UNISWAP_V3_SUBGRAPH_URL=https://gateway.thegraph.com/api/YOUR_KEY/subgraphs/id/YOUR_BASE_UNISWAP_V3_SUBGRAPH_ID
 ETH_RPC_URL=https://your-ethereum-archive-rpc
-ETH_UNISWAP_V3_SUBGRAPH_URL=https://gateway.thegraph.com/api/YOUR_KEY/subgraphs/id/YOUR_ETH_UNISWAP_V3_SUBGRAPH_ID
 ARBITRUM_RPC_URL=https://your-arbitrum-archive-rpc
-ARBITRUM_UNISWAP_V3_SUBGRAPH_URL=https://gateway.thegraph.com/api/YOUR_KEY/subgraphs/id/YOUR_ARBITRUM_UNISWAP_V3_SUBGRAPH_ID
 POLYGON_RPC_URL=https://your-polygon-archive-rpc
 BSC_RPC_URL=https://your-bsc-archive-rpc
 ```
@@ -253,33 +250,43 @@ The older registry/profile/block-range config model is not part of the public CL
 
 ## Discover top pools
 
-Discover the top Uniswap v3 pools from a configured subgraph:
+Discover the most active Uniswap v3 pools from recent RPC logs:
 
 ```bash
 dex-pool discover \
   --chain base \
-  --top 10 \
-  --by totalValueLockedUSD
+  --top 10
 ```
 
-Discovery uses `BASE_UNISWAP_V3_SUBGRAPH_URL` by default for Base. You can override it explicitly:
+Default discovery ranks by swap count over the last 7 days and uses only the chain RPC URL, such as `BASE_RPC_URL`.
 
-```bash
-dex-pool discover \
-  --chain base \
-  --top 10 \
-  --subgraph-url-env BASE_UNISWAP_V3_SUBGRAPH_URL \
-  --json
+Expected output:
+
+```text
+Top active Uniswap v3 pools by swapCount over last 7 days
+
+Rank  Pair        Fee   Swaps  Pool
+1     WETH/USDC   500   15342  0xd0b53d9277642d899df5c87a3966a349a798f224
 ```
 
-Filter by fee tiers or pairs:
+For quote-token universes, rank pools containing the selected quote token by total quote volume:
 
 ```bash
 dex-pool discover \
   --chain base \
   --top 10 \
-  --include-fees 500,3000 \
-  --exclude-pairs USDC/USDbC
+  --by quoteVolume \
+  --quote USDC \
+  --lookback-days 7
+```
+
+Expected output:
+
+```text
+Top Uniswap v3 pools by quoteVolume(USDC) over last 7 days
+
+Rank  Pair        Fee   QuoteVolume(USDC)  Pool
+1     WETH/USDC   500   123456789.12       0xd0b53d9277642d899df5c87a3966a349a798f224
 ```
 
 Write a simple build config from discovered canonical pool addresses:

@@ -4,8 +4,9 @@ import type { DiscoveryMetric } from "../../discovery/discovery.types.js";
 import {
   discoverTopUniswapV3Pools,
   normalizeDiscoveryMetric,
-} from "../../discovery/uniswap-v3-subgraph-discovery.js";
+} from "../../discovery/uniswap-v3-rpc-discovery.js";
 import { getSimpleChainPreset } from "../../simple/chain-presets.js";
+import { resolveSimpleRpcUrl } from "../../simple/resolve-simple-build-config.js";
 import type { DexChain } from "../../types/dex-pool-dataset.types.js";
 import { printError, printJson, printLine } from "../cli-output.js";
 
@@ -13,13 +14,8 @@ type DiscoverCommandOptions = {
   chain?: string;
   top?: string;
   by?: string;
-  minLiquidityUsd?: string;
-  minVolumeUsd?: string;
-  includeFees?: string;
-  includePairs?: string;
-  excludePairs?: string;
-  subgraphUrl?: string;
-  subgraphUrlEnv?: string;
+  lookbackDays?: string;
+  quote?: string;
   json?: boolean;
   writeConfig?: string;
 };
@@ -29,39 +25,35 @@ export async function runDiscoverCommand(
 ): Promise<void> {
   let chain: DexChain;
   let metric: DiscoveryMetric;
+  let lookbackDays: number;
   let pools: Awaited<ReturnType<typeof discoverTopUniswapV3Pools>>;
 
   try {
     chain = normalizeChain(options.chain);
-    metric = normalizeDiscoveryMetric(options.by ?? "totalValueLockedUSD");
-    const subgraphUrl = resolveSubgraphUrl({
-      chain,
-      subgraphUrl: options.subgraphUrl,
-      subgraphUrlEnv: options.subgraphUrlEnv,
-    });
+    metric = normalizeDiscoveryMetric(options.by ?? "swapCount");
+    lookbackDays = parsePositiveInteger(
+      options.lookbackDays ?? "7",
+      "lookback-days",
+    );
+
+    if (metric === "quoteVolume" && options.quote === undefined) {
+      throw new Error(
+        "DISCOVERY_QUOTE_REQUIRED: --quote is required when --by quoteVolume",
+      );
+    }
+
     const top = parsePositiveInteger(options.top ?? "10", "top");
+    const rpcUrl = resolveSimpleRpcUrl({ chain });
     pools = await discoverTopUniswapV3Pools({
-      source: "uniswap_v3_subgraph",
+      source: "uniswap_v3_rpc",
       chain,
-      subgraphUrl,
+      rpcUrl,
       top: {
         by: metric,
         limit: top,
-        minLiquidityUsd: parseOptionalNumber(
-          options.minLiquidityUsd,
-          "min-liquidity-usd",
-        ),
-        minVolumeUsd: parseOptionalNumber(
-          options.minVolumeUsd,
-          "min-volume-usd",
-        ),
+        lookbackDays,
       },
-      includeFees: parseOptionalIntegerList(
-        options.includeFees,
-        "include-fees",
-      ),
-      includePairs: parseOptionalStringList(options.includePairs),
-      excludePairs: parseOptionalStringList(options.excludePairs),
+      quote: options.quote,
     });
 
     if (options.writeConfig !== undefined) {
@@ -86,13 +78,31 @@ export async function runDiscoverCommand(
   if (options.json === true) {
     printJson({
       chain,
-      source: "uniswap_v3_subgraph",
+      source: "uniswap_v3_rpc",
       metric,
+      lookbackDays,
+      quote: options.quote,
+      factoryAddress: pools[0]?.discovery.factoryAddress,
+      factoryDeploymentBlock: pools[0]?.discovery.factoryDeploymentBlock,
+      blockRange:
+        pools[0] !== undefined
+          ? {
+              fromBlock: pools[0].discovery.fromBlock,
+              toBlock: pools[0].discovery.toBlock,
+            }
+          : undefined,
       snapshotAt: pools[0]?.discovery.snapshotAt ?? new Date().toISOString(),
       pools,
     });
   } else {
-    printLine(formatDiscoveredPoolsTable(pools, metric));
+    printLine(
+      formatDiscoveredPoolsTable({
+        pools,
+        metric,
+        lookbackDays,
+        quote: options.quote,
+      }),
+    );
 
     if (options.writeConfig !== undefined) {
       printLine(`Wrote config: ${options.writeConfig}`);
@@ -102,50 +112,34 @@ export async function runDiscoverCommand(
   process.exit(0);
 }
 
-export function resolveSubgraphUrl(input: {
-  chain: DexChain;
-  subgraphUrl?: string;
-  subgraphUrlEnv?: string;
+function formatDiscoveredPoolsTable(input: {
+  pools: Awaited<ReturnType<typeof discoverTopUniswapV3Pools>>;
+  metric: DiscoveryMetric;
+  lookbackDays: number;
+  quote: string | undefined;
 }): string {
-  if (input.subgraphUrl !== undefined && input.subgraphUrl.length > 0) {
-    return input.subgraphUrl;
-  }
-
-  const envName = input.subgraphUrlEnv ?? defaultSubgraphUrlEnv(input.chain);
-  const value = process.env[envName];
-
-  if (value === undefined || value.length === 0) {
-    throw new Error(`DISCOVERY_SUBGRAPH_URL_ENV_MISSING:${envName}`);
-  }
-
-  return value;
-}
-
-function defaultSubgraphUrlEnv(chain: DexChain): string {
-  const preset = getSimpleChainPreset(chain);
-  const prefix = preset.defaultRpcUrlEnv.replace(/_RPC_URL$/, "");
-  return `${prefix}_UNISWAP_V3_SUBGRAPH_URL`;
-}
-
-function formatDiscoveredPoolsTable(
-  pools: Awaited<ReturnType<typeof discoverTopUniswapV3Pools>>,
-  metric: DiscoveryMetric,
-): string {
+  const header =
+    input.metric === "quoteVolume"
+      ? `Top Uniswap v3 pools by quoteVolume(${input.quote}) over last ${input.lookbackDays} days`
+      : `Top active Uniswap v3 pools by swapCount over last ${input.lookbackDays} days`;
+  const valueHeader =
+    input.metric === "quoteVolume"
+      ? `QuoteVolume(${input.quote})`
+      : "Swaps";
   const rows = [
-    ["Rank", "Pair", "Fee", "Pool", metric],
-    ...pools.map((item) => [
+    ["Rank", "Pair", "Fee", valueHeader, "Pool"],
+    ...input.pools.map((item) => [
       String(item.rank),
       item.discovery.pair,
       String(item.discovery.feeTier),
-      item.discovery.poolAddress,
       item.metricValue,
+      item.discovery.poolAddress,
     ]),
   ];
   const widths = rows[0]!.map((_, index) =>
     Math.max(...rows.map((row) => row[index]!.length)),
   );
-
-  return rows
+  const table = rows
     .map((row) =>
       row
         .map((cell, index) => cell.padEnd(widths[index]!))
@@ -153,6 +147,8 @@ function formatDiscoveredPoolsTable(
         .trimEnd(),
     )
     .join("\n");
+
+  return `${header}\n\n${table}`;
 }
 
 async function writeDiscoveredConfig(input: {
@@ -195,49 +191,6 @@ function normalizeChain(chain: string | undefined): DexChain {
   return getSimpleChainPreset(chain).chain;
 }
 
-function parseOptionalStringList(
-  value: string | undefined,
-): string[] | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-
-  return value
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
-
-function parseOptionalIntegerList(
-  value: string | undefined,
-  field: string,
-): number[] | undefined {
-  const items = parseOptionalStringList(value);
-
-  if (items === undefined) {
-    return undefined;
-  }
-
-  return items.map((item) => parsePositiveInteger(item, field));
-}
-
-function parseOptionalNumber(
-  value: string | undefined,
-  field: string,
-): number | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-
-  const parsed = Number(value);
-
-  if (!Number.isFinite(parsed) || parsed < 0) {
-    throw new Error(`DISCOVERY_NUMBER_INVALID:${field}:${value}`);
-  }
-
-  return parsed;
-}
-
 function parsePositiveInteger(value: string, field: string): number {
   const parsed = Number(value);
 
@@ -251,25 +204,23 @@ function parsePositiveInteger(value: string, field: string): number {
 export function registerDiscoverCommand(program: Command): void {
   program
     .command("discover")
-    .description("Discover top Uniswap v3 pools from a configured subgraph")
+    .description("Discover active Uniswap v3 pools from recent RPC logs")
     .option("--chain <chain>", "Chain, e.g. base")
     .option("--top <n>", "Number of pools to return, default 10")
     .option(
       "--by <metric>",
-      "Ranking metric: totalValueLockedUSD, volumeUSD, or liquidity",
+      "Discovery metric: swapCount or quoteVolume. Default: swapCount.",
     )
-    .option("--min-liquidity-usd <amount>", "Minimum TVL in USD")
-    .option("--min-volume-usd <amount>", "Minimum volume in USD")
-    .option("--include-fees <list>", "Comma-separated fee tiers")
-    .option("--include-pairs <list>", "Comma-separated pairs to include")
-    .option("--exclude-pairs <list>", "Comma-separated pairs to exclude")
-    .option("--subgraph-url <url>", "Direct Uniswap v3 subgraph GraphQL URL")
-    .option("--subgraph-url-env <env>", "Environment variable for subgraph URL")
-    .option("--json", "Output JSON")
     .option(
-      "--write-config <path>",
-      "Write simple config with discovered pools",
+      "--lookback-days <n>",
+      "Recent lookback window for activity scoring. Default: 7.",
     )
+    .option(
+      "--quote <symbol>",
+      "Quote token used for quoteVolume, e.g. USDC.",
+    )
+    .option("--json", "Output JSON")
+    .option("--write-config <path>", "Write simple config with discovered pools")
     .action(async (opts: DiscoverCommandOptions) => {
       await runDiscoverCommand(opts);
     });

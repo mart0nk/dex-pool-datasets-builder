@@ -4,21 +4,18 @@ import type {
   DexPoolConfig,
 } from "../types/dex-pool-dataset.types.js";
 
-export type DiscoveryMetric = "totalValueLockedUSD" | "volumeUSD" | "liquidity";
+export type DiscoveryMetric = "swapCount" | "quoteVolume";
 
-export type UniswapV3SubgraphDiscoveryInput = {
-  source: "uniswap_v3_subgraph";
+export type UniswapV3RpcDiscoveryInput = {
+  source: "uniswap_v3_rpc";
   chain: DexChain;
-  subgraphUrl: string;
+  rpcUrl: string;
   top: {
     by: DiscoveryMetric;
     limit: number;
-    minLiquidityUsd?: number;
-    minVolumeUsd?: number;
+    lookbackDays: number;
   };
-  includeFees?: number[];
-  includePairs?: string[];
-  excludePairs?: string[];
+  quote?: string;
 };
 
 export type DiscoveredDexPool = {
@@ -27,7 +24,7 @@ export type DiscoveredDexPool = {
   metric: DiscoveryMetric;
   metricValue: string;
   discovery: {
-    source: "uniswap_v3_subgraph";
+    source: "uniswap_v3_rpc";
     snapshotAt: string;
     rank: number;
     metric: DiscoveryMetric;
@@ -35,5 +32,12 @@ export type DiscoveredDexPool = {
     poolAddress: HexString;
     feeTier: number;
     pair: string;
+    swapCount: number;
+    quoteSymbol?: string;
+    quoteVolume?: string;
+    factoryAddress: HexString;
+    factoryDeploymentBlock: string;
+    fromBlock: string;
+    toBlock: string;
   };
 };
