@@ -6,7 +6,9 @@ import {
   stat,
   writeFile,
 } from "node:fs/promises";
+import { createReadStream } from "node:fs";
 import { dirname, join } from "node:path";
+import { createInterface } from "node:readline";
 import {
   createEvmJsonRpcClient,
   hexToBigInt,
@@ -102,12 +104,12 @@ export async function initializeDiscoveryCache(input: {
   const latestBlock = await client.getLatestBlockNumber();
   const factoryPreset = getUniswapV3FactoryPreset(input.chain);
   const paths = getDiscoveryCachePaths(input);
-  const current = await loadDiscoveryCacheOrStartFresh({
+  const current = await loadDiscoveryCacheStateOrStartFresh({
     chain: input.chain,
     cacheDir: input.cacheDir,
   });
   const startBlock =
-    current.rows.length > 0 || current.state !== undefined
+    current.state !== undefined
       ? BigInt(current.state!.scannedToBlock) + 1n
       : factoryPreset.deploymentBlock;
   const result = await scanAndPersistPoolCreatedRows({
@@ -116,7 +118,7 @@ export async function initializeDiscoveryCache(input: {
     paths,
     factoryAddress: factoryPreset.factoryAddress,
     deploymentBlock: factoryPreset.deploymentBlock,
-    existingRows: current.rows,
+    existingPoolAddresses: current.poolAddresses,
     fromBlock: startBlock,
     toBlock: latestBlock,
     safeLatestBlock: latestBlock,
@@ -146,18 +148,18 @@ export async function refreshDiscoveryCache(input: {
   const latestBlock = await client.getLatestBlockNumber();
   const factoryPreset = getUniswapV3FactoryPreset(input.chain);
   const paths = getDiscoveryCachePaths(input);
-  const current = await loadDiscoveryCache({
+  const current = await loadDiscoveryCacheState({
     chain: input.chain,
     cacheDir: input.cacheDir,
   });
-  const startBlock = BigInt(current.state.scannedToBlock) + 1n;
+  const startBlock = BigInt(current.scannedToBlock) + 1n;
   const result = await scanAndPersistPoolCreatedRows({
     client,
     chain: input.chain,
     paths,
     factoryAddress: factoryPreset.factoryAddress,
     deploymentBlock: factoryPreset.deploymentBlock,
-    existingRows: current.rows,
+    existingPoolAddresses: await readPoolAddressSet(paths.poolsPath),
     fromBlock: startBlock,
     toBlock: latestBlock,
     safeLatestBlock: latestBlock,
@@ -182,23 +184,17 @@ export async function getDiscoveryCacheStatus(input: {
   rpcUrl: string;
   cacheDir?: string;
 }): Promise<DiscoveryCacheStatus> {
-  const cache = await loadDiscoveryCache({
-    chain: input.chain,
-    cacheDir: input.cacheDir,
-  });
+  const state = await loadDiscoveryCacheState(input);
   const client = createEvmJsonRpcClient({ rpcUrl: input.rpcUrl });
   const safeLatestBlock = await client.getLatestBlockNumber();
-  const scannedToBlock = BigInt(cache.state.scannedToBlock);
+  const scannedToBlock = BigInt(state.scannedToBlock);
 
   return {
-    state: {
-      ...cache.state,
-      poolCount: cache.rows.length,
-    },
+    state,
     safeLatestBlock,
     lagBlocks:
       safeLatestBlock > scannedToBlock ? safeLatestBlock - scannedToBlock : 0n,
-    paths: cache.paths,
+    paths: getDiscoveryCachePaths(input),
   };
 }
 
@@ -213,7 +209,6 @@ export async function loadDiscoveryCache(input: {
 }> {
   const paths = getDiscoveryCachePaths(input);
   let state: UniswapV3PoolCacheState;
-  let rawRows: string;
 
   try {
     state = parseState(paths.statePath, await readFile(paths.statePath, "utf8"));
@@ -226,7 +221,7 @@ export async function loadDiscoveryCache(input: {
   }
 
   try {
-    rawRows = await readFile(paths.poolsPath, "utf8");
+    await stat(paths.poolsPath);
   } catch (error: unknown) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
       throw new Error(`DISCOVERY_CACHE_MISSING:${input.chain}`);
@@ -240,7 +235,7 @@ export async function loadDiscoveryCache(input: {
     state,
   });
 
-  const rows = dedupeRowsByPool(parseRows(rawRows, paths.poolsPath));
+  const rows = dedupeRowsByPool(await readRows(paths.poolsPath));
 
   return {
     state,
@@ -258,24 +253,61 @@ export function isDiscoveryCacheMissingError(error: unknown): boolean {
   );
 }
 
-async function loadDiscoveryCacheOrStartFresh(input: {
+async function loadDiscoveryCacheState(input: {
+  chain: DexChain;
+  cacheDir?: string;
+}): Promise<UniswapV3PoolCacheState> {
+  const paths = getDiscoveryCachePaths(input);
+  let state: UniswapV3PoolCacheState;
+
+  try {
+    state = parseState(paths.statePath, await readFile(paths.statePath, "utf8"));
+  } catch (error: unknown) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      throw new Error(`DISCOVERY_CACHE_STATE_MISSING:${input.chain}`);
+    }
+
+    throw error;
+  }
+
+  try {
+    await stat(paths.poolsPath);
+  } catch (error: unknown) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      throw new Error(`DISCOVERY_CACHE_MISSING:${input.chain}`);
+    }
+
+    throw error;
+  }
+
+  validateStateMatchesFactory({
+    chain: input.chain,
+    state,
+  });
+
+  return state;
+}
+
+async function loadDiscoveryCacheStateOrStartFresh(input: {
   chain: DexChain;
   cacheDir?: string;
 }): Promise<{
   state: UniswapV3PoolCacheState | undefined;
-  rows: UniswapV3PoolCacheRow[];
+  poolAddresses: Set<string>;
 }> {
   try {
-    const cache = await loadDiscoveryCache(input);
+    const state = await loadDiscoveryCacheState(input);
+    const paths = getDiscoveryCachePaths(input);
+
     return {
-      state: cache.state,
-      rows: cache.rows,
+      state,
+      poolAddresses: await readPoolAddressSet(paths.poolsPath),
     };
   } catch (error: unknown) {
     if (isDiscoveryCacheMissingError(error)) {
       return {
         state: undefined,
-        rows: [],
+        poolAddresses: new Set(),
       };
     }
 
@@ -289,7 +321,7 @@ async function scanAndPersistPoolCreatedRows(input: {
   paths: DiscoveryCachePaths;
   factoryAddress: `0x${string}`;
   deploymentBlock: bigint;
-  existingRows: UniswapV3PoolCacheRow[];
+  existingPoolAddresses: Set<string>;
   fromBlock: bigint;
   toBlock: bigint;
   safeLatestBlock: bigint;
@@ -301,7 +333,7 @@ async function scanAndPersistPoolCreatedRows(input: {
 }> {
   await mkdir(dirname(input.paths.poolsPath), { recursive: true });
 
-  if (input.existingRows.length === 0) {
+  if (input.existingPoolAddresses.size === 0) {
     await writeFile(input.paths.poolsPath, "", { flag: "a" });
   }
 
@@ -313,9 +345,10 @@ async function scanAndPersistPoolCreatedRows(input: {
           DEFAULT_FACTORY_SCAN_CHUNK_SIZE,
         )
       : [];
-  const rows = [...input.existingRows];
-  const seenPools = new Set(rows.map((row) => row.pool.toLowerCase()));
+  const rows: UniswapV3PoolCacheRow[] = [];
+  const seenPools = new Set(input.existingPoolAddresses);
   let addedRows = 0;
+  let poolCount = seenPools.size;
   let scannedToBlock =
     input.fromBlock <= input.toBlock ? input.fromBlock - 1n : input.toBlock;
 
@@ -344,7 +377,6 @@ async function scanAndPersistPoolCreatedRows(input: {
       topics: [UNISWAP_V3_POOL_CREATED_TOPIC],
     });
     const appendRows: UniswapV3PoolCacheRow[] = [];
-
     for (const log of logs) {
       const row = decodeUniswapV3PoolCreatedLog(log);
       const key = row.pool.toLowerCase();
@@ -361,6 +393,7 @@ async function scanAndPersistPoolCreatedRows(input: {
       await appendFile(input.paths.poolsPath, rowsToJsonl(appendRows), "utf8");
       rows.push(...appendRows);
       addedRows += appendRows.length;
+      poolCount += appendRows.length;
     }
 
     scannedToBlock = range.toBlock;
@@ -372,7 +405,7 @@ async function scanAndPersistPoolCreatedRows(input: {
         deploymentBlock: input.deploymentBlock,
         scannedToBlock,
         safeLatestBlock: input.safeLatestBlock,
-        poolCount: rows.length,
+        poolCount,
       }),
     );
   }
@@ -388,7 +421,7 @@ async function scanAndPersistPoolCreatedRows(input: {
           ? input.toBlock
           : input.fromBlock,
     safeLatestBlock: input.safeLatestBlock,
-    poolCount: rows.length,
+    poolCount,
   });
 
   if (ranges.length === 0) {
@@ -461,29 +494,63 @@ function validateStateMatchesFactory(input: {
   }
 }
 
-function parseRows(raw: string, path: string): UniswapV3PoolCacheRow[] {
-  return raw
-    .split("\n")
-    .filter((line) => line.trim().length > 0)
-    .map((line, index) => {
-      try {
-        return validateCacheRow(
-          JSON.parse(line) as unknown,
-          `${path}:${index + 1}`,
-        );
-      } catch (error: unknown) {
-        if (
-          error instanceof Error &&
-          error.message.startsWith("DISCOVERY_CACHE_STATE_INVALID:")
-        ) {
-          throw error;
-        }
+async function readRows(path: string): Promise<UniswapV3PoolCacheRow[]> {
+  const rows: UniswapV3PoolCacheRow[] = [];
+  const lines = createInterface({
+    input: createReadStream(path, { encoding: "utf8" }),
+    crlfDelay: Infinity,
+  });
+  let lineNumber = 0;
 
-        throw new Error(`DISCOVERY_CACHE_STATE_INVALID:${path}:${index + 1}`, {
-          cause: error,
-        });
-      }
+  for await (const line of lines) {
+    lineNumber += 1;
+
+    if (line.trim().length === 0) {
+      continue;
+    }
+
+    rows.push(parseRowLine(line, `${path}:${lineNumber}`));
+  }
+
+  return rows;
+}
+
+async function readPoolAddressSet(path: string): Promise<Set<string>> {
+  const pools = new Set<string>();
+  const lines = createInterface({
+    input: createReadStream(path, { encoding: "utf8" }),
+    crlfDelay: Infinity,
+  });
+  let lineNumber = 0;
+
+  for await (const line of lines) {
+    lineNumber += 1;
+
+    if (line.trim().length === 0) {
+      continue;
+    }
+
+    pools.add(parseRowLine(line, `${path}:${lineNumber}`).pool.toLowerCase());
+  }
+
+  return pools;
+}
+
+function parseRowLine(line: string, location: string): UniswapV3PoolCacheRow {
+  try {
+    return validateCacheRow(JSON.parse(line) as unknown, location);
+  } catch (error: unknown) {
+    if (
+      error instanceof Error &&
+      error.message.startsWith("DISCOVERY_CACHE_STATE_INVALID:")
+    ) {
+      throw error;
+    }
+
+    throw new Error(`DISCOVERY_CACHE_STATE_INVALID:${location}`, {
+      cause: error,
     });
+  }
 }
 
 function validateCacheRow(

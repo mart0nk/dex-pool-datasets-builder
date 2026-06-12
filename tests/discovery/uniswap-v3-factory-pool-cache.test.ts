@@ -230,6 +230,10 @@ describe("Uniswap v3 factory pool cache", () => {
       poolCount: 2,
     });
     expect(resumed.rows.map((row) => row.pool)).toEqual([
+      POOL_B.toLowerCase(),
+    ]);
+    const loaded = await loadDiscoveryCache({ chain: "base", cacheDir });
+    expect(loaded.rows.map((row) => row.pool)).toEqual([
       POOL_A.toLowerCase(),
       POOL_B.toLowerCase(),
     ]);
