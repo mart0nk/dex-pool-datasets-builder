@@ -32,7 +32,7 @@ export type EvmBlock = {
 };
 
 export type GetLogsInput = {
-  address: HexString | HexString[];
+  address?: HexString | HexString[];
   fromBlock: bigint;
   toBlock: bigint;
   topics?: HexString[];
@@ -176,7 +176,9 @@ export function createEvmJsonRpcClient(
     getLogs(getLogsInput) {
       return request<EvmLog[]>("eth_getLogs", [
         {
-          address: getLogsInput.address,
+          ...(getLogsInput.address !== undefined
+            ? { address: getLogsInput.address }
+            : {}),
           fromBlock: toQuantityHex(getLogsInput.fromBlock),
           toBlock: toQuantityHex(getLogsInput.toBlock),
           ...(getLogsInput.topics !== undefined

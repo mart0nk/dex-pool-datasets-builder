@@ -23,7 +23,6 @@ import type {
 import { decodeUniswapV3SwapAmounts } from "./uniswap-v3-swap-amount-decoder.js";
 
 const DEFAULT_SWAP_SCAN_CHUNK_SIZE = 5_000n;
-const DEFAULT_POOL_ADDRESS_BATCH_SIZE = 100;
 
 type PoolScore = {
   candidate: UniswapV3PoolCandidate;
@@ -155,10 +154,6 @@ async function scorePoolCandidates(input: {
     input.toBlock,
     DEFAULT_SWAP_SCAN_CHUNK_SIZE,
   );
-  const addressBatches = chunk(
-    input.candidates.map((candidate) => candidate.poolAddress),
-    DEFAULT_POOL_ADDRESS_BATCH_SIZE,
-  );
 
   for (const candidate of input.candidates) {
     scoreByPool.set(candidate.poolAddress.toLowerCase(), {
@@ -171,62 +166,57 @@ async function scorePoolCandidates(input: {
   input.onProgress?.({
     type: "score_start",
     candidateCount: input.candidates.length,
-    batches: addressBatches.length,
+    batches: 1,
     ranges: ranges.length,
     fromBlock: input.fromBlock.toString(),
     toBlock: input.toBlock.toString(),
   });
 
-  for (let batchIndex = 0; batchIndex < addressBatches.length; batchIndex += 1) {
-    const addresses = addressBatches[batchIndex]!;
+  input.onProgress?.({
+    type: "score_batch",
+    batchIndex: 1,
+    batchTotal: 1,
+    addressCount: input.candidates.length,
+  });
+
+  for (let rangeIndex = 0; rangeIndex < ranges.length; rangeIndex += 1) {
+    const range = ranges[rangeIndex]!;
 
     input.onProgress?.({
-      type: "score_batch",
-      batchIndex: batchIndex + 1,
-      batchTotal: addressBatches.length,
-      addressCount: addresses.length,
+      type: "score_range",
+      batchIndex: 1,
+      batchTotal: 1,
+      rangeIndex: rangeIndex + 1,
+      rangeTotal: ranges.length,
+      fromBlock: range.fromBlock.toString(),
+      toBlock: range.toBlock.toString(),
     });
 
-    for (let rangeIndex = 0; rangeIndex < ranges.length; rangeIndex += 1) {
-      const range = ranges[rangeIndex]!;
+    const logs = await input.client.getLogs({
+      fromBlock: range.fromBlock,
+      toBlock: range.toBlock,
+      topics: [UNISWAP_V3_SWAP_TOPIC],
+    });
 
-      input.onProgress?.({
-        type: "score_range",
-        batchIndex: batchIndex + 1,
-        batchTotal: addressBatches.length,
-        rangeIndex: rangeIndex + 1,
-        rangeTotal: ranges.length,
-        fromBlock: range.fromBlock.toString(),
-        toBlock: range.toBlock.toString(),
-      });
+    for (const log of logs) {
+      const key = log.address.toLowerCase();
+      const candidate = candidateByAddress.get(key);
+      const score = scoreByPool.get(key);
 
-      const logs = await input.client.getLogs({
-        address: addresses,
-        fromBlock: range.fromBlock,
-        toBlock: range.toBlock,
-        topics: [UNISWAP_V3_SWAP_TOPIC],
-      });
+      if (candidate === undefined || score === undefined) {
+        continue;
+      }
 
-      for (const log of logs) {
-        const key = log.address.toLowerCase();
-        const candidate = candidateByAddress.get(key);
-        const score = scoreByPool.get(key);
+      score.swapCount += 1;
 
-        if (candidate === undefined || score === undefined) {
-          continue;
-        }
-
-        score.swapCount += 1;
-
-        if (input.metric === "quoteVolume") {
-          const amounts = decodeUniswapV3SwapAmounts(log.data);
-          const quoteAmountRaw =
-            input.quoteToken!.address.toLowerCase() ===
-            candidate.token0.toLowerCase()
-              ? amounts.amount0
-              : amounts.amount1;
-          score.quoteVolumeRaw += abs(quoteAmountRaw);
-        }
+      if (input.metric === "quoteVolume") {
+        const amounts = decodeUniswapV3SwapAmounts(log.data);
+        const quoteAmountRaw =
+          input.quoteToken!.address.toLowerCase() ===
+          candidate.token0.toLowerCase()
+            ? amounts.amount0
+            : amounts.amount1;
+        score.quoteVolumeRaw += abs(quoteAmountRaw);
       }
     }
   }
@@ -363,14 +353,4 @@ function formatUnits(value: bigint, decimals: number): string {
 
 function abs(value: bigint): bigint {
   return value < 0n ? -value : value;
-}
-
-function chunk<T>(items: T[], size: number): T[][] {
-  const chunks: T[][] = [];
-
-  for (let index = 0; index < items.length; index += size) {
-    chunks.push(items.slice(index, index + size));
-  }
-
-  return chunks;
 }

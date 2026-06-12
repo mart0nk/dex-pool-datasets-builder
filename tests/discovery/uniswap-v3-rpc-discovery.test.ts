@@ -137,9 +137,9 @@ describe("Uniswap v3 RPC discovery", () => {
       ([input]) => input.topics?.[0] === UNISWAP_V3_SWAP_TOPIC,
     )?.[0];
     expect(swapCall).toMatchObject({
-      address: [POOL_A.toLowerCase(), POOL_B.toLowerCase()],
       topics: [UNISWAP_V3_SWAP_TOPIC],
     });
+    expect(swapCall?.address).toBeUndefined();
     expect(pools).toHaveLength(1);
     expect(pools[0]!.pool.poolAddress).toBe(POOL_A.toLowerCase());
     expect(pools[0]!.metric).toBe("swapCount");
@@ -201,7 +201,7 @@ describe("Uniswap v3 RPC discovery", () => {
     const swapCall = getLogs.mock.calls.find(
       ([input]) => input.topics?.[0] === UNISWAP_V3_SWAP_TOPIC,
     )?.[0];
-    expect(swapCall?.address).toEqual([POOL_A.toLowerCase()]);
+    expect(swapCall?.address).toBeUndefined();
     expect(pools).toHaveLength(1);
     expect(pools[0]!.metricValue).toBe("3.75");
     expect(pools[0]!.discovery.quoteVolume).toBe("3.75");
@@ -240,10 +240,10 @@ describe("Uniswap v3 RPC discovery", () => {
     });
 
     expect(pools).toEqual([]);
-    expect(getLogs).toHaveBeenCalledTimes(6);
-    expect(progress[0]).toBe("start:2:3");
-    expect(progress).toContain("range:1/2:1/3");
-    expect(progress).toContain("range:2/2:3/3");
+    expect(getLogs).toHaveBeenCalledTimes(3);
+    expect(progress[0]).toBe("start:1:3");
+    expect(progress).toContain("range:1/1:1/3");
+    expect(progress).toContain("range:1/1:3/3");
   });
 });
 
