@@ -1,4 +1,11 @@
-import { mkdir, readFile, rename, stat, writeFile, appendFile } from "node:fs/promises";
+import {
+  appendFile,
+  mkdir,
+  readFile,
+  rename,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { dirname, join } from "node:path";
 import {
   createEvmJsonRpcClient,
@@ -362,8 +369,8 @@ function parseState(path: string, raw: string): UniswapV3PoolCacheState {
     }
 
     return parsed;
-  } catch {
-    throw new Error(`DISCOVERY_CACHE_STATE_INVALID:${path}`);
+  } catch (error: unknown) {
+    throw new Error(`DISCOVERY_CACHE_STATE_INVALID:${path}`, { cause: error });
   }
 }
 
@@ -389,11 +396,71 @@ function parseRows(raw: string, path: string): UniswapV3PoolCacheRow[] {
     .filter((line) => line.trim().length > 0)
     .map((line, index) => {
       try {
-        return JSON.parse(line) as UniswapV3PoolCacheRow;
-      } catch {
-        throw new Error(`DISCOVERY_CACHE_STATE_INVALID:${path}:${index + 1}`);
+        return validateCacheRow(
+          JSON.parse(line) as unknown,
+          `${path}:${index + 1}`,
+        );
+      } catch (error: unknown) {
+        if (
+          error instanceof Error &&
+          error.message.startsWith("DISCOVERY_CACHE_STATE_INVALID:")
+        ) {
+          throw error;
+        }
+
+        throw new Error(`DISCOVERY_CACHE_STATE_INVALID:${path}:${index + 1}`, {
+          cause: error,
+        });
       }
     });
+}
+
+function validateCacheRow(
+  value: unknown,
+  location: string,
+): UniswapV3PoolCacheRow {
+  if (typeof value !== "object" || value === null) {
+    throw new Error(`DISCOVERY_CACHE_STATE_INVALID:${location}:row`);
+  }
+
+  const row = value as Record<string, unknown>;
+  assertDecimalString(row.blockNumber, location, "blockNumber");
+  assertHexString(row.blockHash, location, "blockHash");
+  assertHexString(row.transactionHash, location, "transactionHash");
+  assertDecimalString(row.logIndex, location, "logIndex");
+  assertHexString(row.token0, location, "token0");
+  assertHexString(row.token1, location, "token1");
+  assertInteger(row.fee, location, "fee");
+  assertInteger(row.tickSpacing, location, "tickSpacing");
+  assertHexString(row.pool, location, "pool");
+
+  return row as UniswapV3PoolCacheRow;
+}
+
+function assertDecimalString(
+  value: unknown,
+  location: string,
+  field: string,
+): void {
+  if (typeof value !== "string" || !/^[0-9]+$/.test(value)) {
+    throw new Error(`DISCOVERY_CACHE_STATE_INVALID:${location}:${field}`);
+  }
+}
+
+function assertHexString(
+  value: unknown,
+  location: string,
+  field: string,
+): void {
+  if (typeof value !== "string" || !/^0x[0-9a-fA-F]+$/.test(value)) {
+    throw new Error(`DISCOVERY_CACHE_STATE_INVALID:${location}:${field}`);
+  }
+}
+
+function assertInteger(value: unknown, location: string, field: string): void {
+  if (!Number.isInteger(value)) {
+    throw new Error(`DISCOVERY_CACHE_STATE_INVALID:${location}:${field}`);
+  }
 }
 
 function dedupeRowsByPool(

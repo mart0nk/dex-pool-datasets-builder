@@ -255,6 +255,58 @@ describe("Uniswap v3 factory pool cache", () => {
     );
   });
 
+  it("preserves the original cause for invalid state JSON", async () => {
+    const cacheDir = await makeTempDir();
+    const paths = getDiscoveryCachePaths({ chain: "base", cacheDir });
+    await mkdir(join(cacheDir, "base"), { recursive: true });
+    await writeFile(paths.statePath, "{invalid", "utf8");
+    await writeFile(paths.poolsPath, "", "utf8");
+
+    await expect(loadDiscoveryCache({ chain: "base", cacheDir })).rejects.toMatchObject({
+      message: `DISCOVERY_CACHE_STATE_INVALID:${paths.statePath}`,
+      cause: expect.any(SyntaxError),
+    });
+  });
+
+  it("rejects structurally invalid JSONL rows", async () => {
+    const cacheDir = await makeTempDir();
+    const paths = getDiscoveryCachePaths({ chain: "base", cacheDir });
+    await mkdir(join(cacheDir, "base"), { recursive: true });
+    await writeFile(
+      paths.statePath,
+      `${JSON.stringify({
+        version: 1,
+        chain: "base",
+        factoryAddress: FACTORY,
+        deploymentBlock: "1371680",
+        scannedToBlock: "1371700",
+        safeLatestBlock: "1371700",
+        poolCount: 1,
+        updatedAt: "2026-06-10T00:00:00.000Z",
+      })}\n`,
+      "utf8",
+    );
+    await writeFile(
+      paths.poolsPath,
+      `${JSON.stringify({
+        blockNumber: "1371680",
+        blockHash: "0x".padEnd(66, "2"),
+        transactionHash: "0x".padEnd(66, "3"),
+        logIndex: "0",
+        token0: WETH.toLowerCase(),
+        token1: USDC.toLowerCase(),
+        fee: "500",
+        tickSpacing: 10,
+        pool: POOL_A.toLowerCase(),
+      })}\n`,
+      "utf8",
+    );
+
+    await expect(loadDiscoveryCache({ chain: "base", cacheDir })).rejects.toThrow(
+      `DISCOVERY_CACHE_STATE_INVALID:${paths.poolsPath}:1:fee`,
+    );
+  });
+
   it("dedupes duplicate JSONL rows by pool address when loading candidates", async () => {
     const cacheDir = await makeTempDir();
     const paths = getDiscoveryCachePaths({ chain: "base", cacheDir });

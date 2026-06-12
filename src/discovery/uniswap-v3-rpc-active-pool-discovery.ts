@@ -17,6 +17,7 @@ import type {
   DiscoveredDexPool,
   DiscoveryMetric,
   UniswapV3PoolCandidate,
+  UniswapV3RpcDiscoveryProgressEvent,
   UniswapV3RpcDiscoveryInput,
 } from "./discovery.types.js";
 import { decodeUniswapV3SwapAmounts } from "./uniswap-v3-swap-amount-decoder.js";
@@ -53,6 +54,11 @@ export async function discoverTopUniswapV3Pools(
     latestBlock,
     lookbackDays,
   });
+  input.onResolvedRange?.({
+    latestBlock: latestBlock.toString(),
+    fromBlock: lookbackRange.fromBlock.toString(),
+    toBlock: lookbackRange.toBlock.toString(),
+  });
   const scored = await scorePoolCandidates({
     client,
     candidates:
@@ -65,6 +71,7 @@ export async function discoverTopUniswapV3Pools(
     quoteToken,
     fromBlock: lookbackRange.fromBlock,
     toBlock: lookbackRange.toBlock,
+    onProgress: input.onProgress,
   });
   const topScores = scored
     .filter((score) => score.swapCount > 0)
@@ -134,6 +141,7 @@ async function scorePoolCandidates(input: {
   quoteToken: DexPoolToken | undefined;
   fromBlock: bigint;
   toBlock: bigint;
+  onProgress?: (event: UniswapV3RpcDiscoveryProgressEvent) => void;
 }): Promise<PoolScore[]> {
   const scoreByPool = new Map<string, PoolScore>();
   const candidateByAddress = new Map(
@@ -160,8 +168,38 @@ async function scorePoolCandidates(input: {
     });
   }
 
-  for (const addresses of addressBatches) {
-    for (const range of ranges) {
+  input.onProgress?.({
+    type: "score_start",
+    candidateCount: input.candidates.length,
+    batches: addressBatches.length,
+    ranges: ranges.length,
+    fromBlock: input.fromBlock.toString(),
+    toBlock: input.toBlock.toString(),
+  });
+
+  for (let batchIndex = 0; batchIndex < addressBatches.length; batchIndex += 1) {
+    const addresses = addressBatches[batchIndex]!;
+
+    input.onProgress?.({
+      type: "score_batch",
+      batchIndex: batchIndex + 1,
+      batchTotal: addressBatches.length,
+      addressCount: addresses.length,
+    });
+
+    for (let rangeIndex = 0; rangeIndex < ranges.length; rangeIndex += 1) {
+      const range = ranges[rangeIndex]!;
+
+      input.onProgress?.({
+        type: "score_range",
+        batchIndex: batchIndex + 1,
+        batchTotal: addressBatches.length,
+        rangeIndex: rangeIndex + 1,
+        rangeTotal: ranges.length,
+        fromBlock: range.fromBlock.toString(),
+        toBlock: range.toBlock.toString(),
+      });
+
       const logs = await input.client.getLogs({
         address: addresses,
         fromBlock: range.fromBlock,
@@ -192,6 +230,13 @@ async function scorePoolCandidates(input: {
       }
     }
   }
+
+  input.onProgress?.({
+    type: "score_done",
+    candidateCount: input.candidates.length,
+    scoredPools: [...scoreByPool.values()].filter((score) => score.swapCount > 0)
+      .length,
+  });
 
   return [...scoreByPool.values()];
 }

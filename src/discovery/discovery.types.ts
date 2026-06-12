@@ -47,7 +47,45 @@ export type UniswapV3RpcDiscoveryInput = {
     lookbackDays: number;
   };
   quote?: string;
+  onProgress?: (event: UniswapV3RpcDiscoveryProgressEvent) => void;
+  onResolvedRange?: (range: UniswapV3RpcResolvedRange) => void;
 };
+
+export type UniswapV3RpcResolvedRange = {
+  latestBlock: string;
+  fromBlock: string;
+  toBlock: string;
+};
+
+export type UniswapV3RpcDiscoveryProgressEvent =
+  | {
+      type: "score_start";
+      candidateCount: number;
+      batches: number;
+      ranges: number;
+      fromBlock: string;
+      toBlock: string;
+    }
+  | {
+      type: "score_batch";
+      batchIndex: number;
+      batchTotal: number;
+      addressCount: number;
+    }
+  | {
+      type: "score_range";
+      batchIndex: number;
+      batchTotal: number;
+      rangeIndex: number;
+      rangeTotal: number;
+      fromBlock: string;
+      toBlock: string;
+    }
+  | {
+      type: "score_done";
+      candidateCount: number;
+      scoredPools: number;
+    };
 
 export type DiscoveredDexPool = {
   rank: number;

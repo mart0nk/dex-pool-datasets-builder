@@ -1,16 +1,20 @@
 import { access, writeFile } from "node:fs/promises";
 import type { Command } from "commander";
-import type { DiscoveryMetric } from "../../discovery/discovery.types.js";
+import type {
+  DiscoveryMetric,
+  UniswapV3RpcDiscoveryProgressEvent,
+  UniswapV3RpcResolvedRange,
+} from "../../discovery/discovery.types.js";
 import {
   discoverTopUniswapV3Pools,
   normalizeDiscoveryMetric,
 } from "../../discovery/uniswap-v3-rpc-discovery.js";
 import {
   discoveryCacheExists,
-  getDiscoveryCacheStatus,
   initializeDiscoveryCache,
   isDiscoveryCacheMissingError,
   loadDiscoveryCache,
+  type DiscoveryCacheProgressEvent,
 } from "../../discovery/uniswap-v3-factory-pool-cache.js";
 import { getSimpleChainPreset } from "../../simple/chain-presets.js";
 import { resolveSimpleRpcUrl } from "../../simple/resolve-simple-build-config.js";
@@ -37,6 +41,7 @@ export async function runDiscoverCommand(
   let pools: Awaited<ReturnType<typeof discoverTopUniswapV3Pools>>;
   let cache: Awaited<ReturnType<typeof loadDiscoveryCache>>;
   let cacheLagBlocks: bigint | undefined;
+  let resolvedRange: UniswapV3RpcResolvedRange | undefined;
 
   try {
     chain = normalizeChain(options.chain);
@@ -57,7 +62,12 @@ export async function runDiscoverCommand(
     const cacheExists = await discoveryCacheExists({ chain });
 
     if (!cacheExists && options.initCache === true) {
-      await initializeDiscoveryCache({ chain, rpcUrl });
+      await initializeDiscoveryCache({
+        chain,
+        rpcUrl,
+        onProgress:
+          options.json === true ? undefined : printDiscoveryCacheProgress,
+      });
     }
 
     try {
@@ -70,8 +80,6 @@ export async function runDiscoverCommand(
       throw error;
     }
 
-    const status = await getDiscoveryCacheStatus({ chain, rpcUrl });
-    cacheLagBlocks = status.lagBlocks;
     pools = await discoverTopUniswapV3Pools({
       source: "uniswap_v3_rpc",
       chain,
@@ -83,7 +91,15 @@ export async function runDiscoverCommand(
         lookbackDays,
       },
       quote: options.quote,
+      onProgress: options.json === true ? undefined : printScoringProgress,
+      onResolvedRange: (range) => {
+        resolvedRange = range;
+      },
     });
+    cacheLagBlocks =
+      resolvedRange === undefined
+        ? undefined
+        : calculateCacheLagBlocks(cache.state.scannedToBlock, resolvedRange.toBlock);
 
     if (options.writeConfig !== undefined) {
       await writeDiscoveredConfig({
@@ -113,8 +129,18 @@ export async function runDiscoverCommand(
       quote: options.quote,
       factoryAddress: cache.state.factoryAddress,
       factoryDeploymentBlock: cache.state.deploymentBlock,
+      cache: {
+        poolCount: cache.rows.length,
+        scannedToBlock: cache.state.scannedToBlock,
+        lagBlocks: cacheLagBlocks?.toString(),
+      },
       blockRange:
-        pools[0] !== undefined
+        resolvedRange !== undefined
+          ? {
+              fromBlock: resolvedRange.fromBlock,
+              toBlock: resolvedRange.toBlock,
+            }
+          : pools[0] !== undefined
           ? {
               fromBlock: pools[0].discovery.fromBlock,
               toBlock: pools[0].discovery.toBlock,
@@ -149,6 +175,60 @@ export async function runDiscoverCommand(
   }
 
   process.exit(0);
+}
+
+function printDiscoveryCacheProgress(event: DiscoveryCacheProgressEvent): void {
+  switch (event.type) {
+    case "scan_start":
+      printLine("");
+      printLine("Initializing missing discovery cache:");
+      printLine("Scanning PoolCreated logs:");
+      break;
+    case "scan_chunk":
+      printLine(
+        `  chunk ${event.index}/${event.total} blocks ${event.fromBlock.toString()} - ${event.toBlock.toString()}`,
+      );
+      break;
+    case "scan_done":
+      printLine(
+        `Initialized discovery cache with ${event.foundPools} pools through block ${event.scannedToBlock.toString()}.`,
+      );
+      printLine("");
+      break;
+  }
+}
+
+function printScoringProgress(event: UniswapV3RpcDiscoveryProgressEvent): void {
+  switch (event.type) {
+    case "score_start":
+      printLine(
+        `Scoring ${event.candidateCount} cached pools across ${event.batches} batches and ${event.ranges} block ranges.`,
+      );
+      break;
+    case "score_batch":
+      printLine(
+        `  scoring batch ${event.batchIndex}/${event.batchTotal} (${event.addressCount} pools)`,
+      );
+      break;
+    case "score_range":
+      printLine(
+        `    range ${event.rangeIndex}/${event.rangeTotal} blocks ${event.fromBlock} - ${event.toBlock}`,
+      );
+      break;
+    case "score_done":
+      printLine(`Scored pools with swaps: ${event.scoredPools}`);
+      printLine("");
+      break;
+  }
+}
+
+function calculateCacheLagBlocks(
+  scannedToBlock: string,
+  latestScoringBlock: string,
+): bigint {
+  const scanned = BigInt(scannedToBlock);
+  const latest = BigInt(latestScoringBlock);
+  return latest > scanned ? latest - scanned : 0n;
 }
 
 function formatDiscoveredPoolsTable(input: {

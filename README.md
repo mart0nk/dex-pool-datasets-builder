@@ -96,6 +96,8 @@ The CLI automatically loads `.env`.
 
 For historical builds, use an archive-capable RPC. Public RPC endpoints can work for small ranges, but they may be slow or rate-limited.
 
+`BSC_RPC_URL` is available for chain/RPC experiments, but Uniswap v3 discovery currently has factory deployment presets only for `ethereum`, `base`, `arbitrum`, and `polygon`.
+
 ---
 
 ## Local CLI usage
@@ -258,6 +260,8 @@ Discovery is RPC-backed and uses two phases:
 
 This keeps expensive historical factory scans explicit. `dex-pool discover` requires an initialized cache unless `--init-cache` is provided.
 
+Supported Uniswap v3 discovery chains in this MVP are `ethereum`, `base`, `arbitrum`, and `polygon`. Other chains fail explicitly until their factory address and deployment block are verified and added as presets.
+
 Initialize the local discovery cache:
 
 ```bash
@@ -351,6 +355,8 @@ dex-pool discover \
 ```
 
 The generated config uses `pools[]`, not `pairs[]`, because discovery has already resolved canonical pool contracts.
+
+Discovery metadata uses `source: "uniswap_v3_rpc"` and metrics `swapCount | quoteVolume`. Older subgraph source/metric names are intentionally not part of this RPC-only discovery surface.
 
 ---
 

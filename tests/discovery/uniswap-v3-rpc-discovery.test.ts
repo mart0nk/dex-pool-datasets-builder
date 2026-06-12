@@ -161,7 +161,7 @@ describe("Uniswap v3 RPC discovery", () => {
 
       return [];
     });
-    mockCreateClient.mockReturnValue(makeClient({ getLogs }));
+    mockCreateClient.mockReturnValue(makeClient({ getLogs, latestBlock: 10_000n }));
     mockReadPoolConfig.mockResolvedValue({
       id: "base-uniswap-v3-weth-usdc-500-d0b53d92",
       chain: "base",
@@ -207,20 +207,61 @@ describe("Uniswap v3 RPC discovery", () => {
     expect(pools[0]!.discovery.quoteVolume).toBe("3.75");
     expect(pools[0]!.discovery.quoteSymbol).toBe("USDC");
   });
+
+  it("emits scoring progress across multiple batches and ranges", async () => {
+    const getLogs = vi.fn(async () => []);
+    const progress: string[] = [];
+    mockCreateClient.mockReturnValue(
+      makeClient({ getLogs, latestBlock: 10_000n }),
+    );
+
+    const pools = await discoverTopUniswapV3Pools({
+      source: "uniswap_v3_rpc",
+      chain: "base",
+      rpcUrl: "https://base-rpc.example",
+      candidates: Array.from({ length: 101 }, (_, index) => ({
+        token0: WETH.toLowerCase() as `0x${string}`,
+        token1: USDC.toLowerCase() as `0x${string}`,
+        feeTier: 500,
+        poolAddress: addressFromNumber(index + 1),
+      })),
+      top: { by: "swapCount", limit: 10, lookbackDays: 7 },
+      onProgress: (event) => {
+        if (event.type === "score_start") {
+          progress.push(`start:${event.batches}:${event.ranges}`);
+        }
+
+        if (event.type === "score_range") {
+          progress.push(
+            `range:${event.batchIndex}/${event.batchTotal}:${event.rangeIndex}/${event.rangeTotal}`,
+          );
+        }
+      },
+    });
+
+    expect(pools).toEqual([]);
+    expect(getLogs).toHaveBeenCalledTimes(6);
+    expect(progress[0]).toBe("start:2:3");
+    expect(progress).toContain("range:1/2:1/3");
+    expect(progress).toContain("range:2/2:3/3");
+  });
 });
 
 function makeClient(input: {
   getLogs: EvmJsonRpcClient["getLogs"];
+  latestBlock?: bigint;
 }): EvmJsonRpcClient {
+  const latestBlock = input.latestBlock ?? 2_000_000n;
+
   return {
     getLogs: input.getLogs,
-    getLatestBlockNumber: async () => 2_000_000n,
+    getLatestBlockNumber: async () => latestBlock,
     getBlockByNumber: async (blockNumber: bigint) =>
       ({
         number: toHex(blockNumber),
         hash: "0x".padEnd(66, "1"),
         timestamp:
-          blockNumber === 2_000_000n
+          blockNumber === latestBlock
             ? toHex(1_700_604_800n)
             : toHex(1_700_000_000n + blockNumber),
       }) satisfies EvmBlock,
@@ -288,4 +329,8 @@ function signedWord(value: bigint): string {
 
 function toHex(value: bigint): `0x${string}` {
   return `0x${value.toString(16)}`;
+}
+
+function addressFromNumber(value: number): `0x${string}` {
+  return `0x${value.toString(16).padStart(40, "0")}`;
 }

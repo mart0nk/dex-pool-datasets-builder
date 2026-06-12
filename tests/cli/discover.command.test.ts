@@ -22,7 +22,6 @@ vi.mock("../../src/discovery/uniswap-v3-rpc-discovery.js", async (importOriginal
 
 vi.mock("../../src/discovery/uniswap-v3-factory-pool-cache.js", () => ({
   discoveryCacheExists: vi.fn(),
-  getDiscoveryCacheStatus: vi.fn(),
   initializeDiscoveryCache: vi.fn(),
   isDiscoveryCacheMissingError: (error: unknown) => {
     const message = error instanceof Error ? error.message : String(error);
@@ -37,14 +36,12 @@ vi.mock("../../src/discovery/uniswap-v3-factory-pool-cache.js", () => ({
 import { discoverTopUniswapV3Pools } from "../../src/discovery/uniswap-v3-rpc-discovery.js";
 import {
   discoveryCacheExists,
-  getDiscoveryCacheStatus,
   initializeDiscoveryCache,
   loadDiscoveryCache,
 } from "../../src/discovery/uniswap-v3-factory-pool-cache.js";
 
 const mockDiscover = vi.mocked(discoverTopUniswapV3Pools);
 const mockCacheExists = vi.mocked(discoveryCacheExists);
-const mockGetCacheStatus = vi.mocked(getDiscoveryCacheStatus);
 const mockInitializeCache = vi.mocked(initializeDiscoveryCache);
 const mockLoadCache = vi.mocked(loadDiscoveryCache);
 
@@ -177,21 +174,19 @@ beforeEach(() => {
     },
   );
 
-  mockDiscover.mockResolvedValue(DISCOVERED_SWAP_COUNT);
+  mockDiscover.mockImplementation(async (input) => {
+    input.onResolvedRange?.({
+      latestBlock: "10000",
+      fromBlock: "9000",
+      toBlock: "10000",
+    });
+    return DISCOVERED_SWAP_COUNT;
+  });
   mockCacheExists.mockResolvedValue(true);
   mockLoadCache.mockResolvedValue({
     state: CACHE_STATE,
     rows: CACHE_ROWS,
     candidates: CACHE_CANDIDATES,
-    paths: {
-      poolsPath: ".data/cache/base/uniswap-v3-pools.jsonl",
-      statePath: ".data/cache/base/uniswap-v3-pools.state.json",
-    },
-  });
-  mockGetCacheStatus.mockResolvedValue({
-    state: CACHE_STATE,
-    safeLatestBlock: 10_000n,
-    lagBlocks: 0n,
     paths: {
       poolsPath: ".data/cache/base/uniswap-v3-pools.jsonl",
       statePath: ".data/cache/base/uniswap-v3-pools.state.json",
@@ -246,6 +241,8 @@ describe("discover command", () => {
       candidates: CACHE_CANDIDATES,
       top: { by: "swapCount", limit: 10, lookbackDays: 7 },
       quote: undefined,
+      onProgress: expect.any(Function),
+      onResolvedRange: expect.any(Function),
     });
     expect(exitCode).toBe(0);
   });
@@ -262,6 +259,7 @@ describe("discover command", () => {
       lookbackDays: number;
       factoryAddress: string;
       factoryDeploymentBlock: string;
+      cache: { poolCount: number; scannedToBlock: string; lagBlocks?: string };
       pools: DiscoveredDexPool[];
     };
     expect(parsed.chain).toBe("base");
@@ -270,6 +268,11 @@ describe("discover command", () => {
     expect(parsed.lookbackDays).toBe(7);
     expect(parsed.factoryAddress).toBe(CACHE_STATE.factoryAddress);
     expect(parsed.factoryDeploymentBlock).toBe("1371680");
+    expect(parsed.cache).toEqual({
+      poolCount: 2,
+      scannedToBlock: "10000",
+      lagBlocks: "0",
+    });
     expect(parsed.pools).toHaveLength(1);
   });
 
@@ -299,6 +302,7 @@ describe("discover command", () => {
     expect(mockInitializeCache).toHaveBeenCalledWith({
       chain: "base",
       rpcUrl: "https://base-rpc.example",
+      onProgress: expect.any(Function),
     });
     expect(mockDiscover).toHaveBeenCalledOnce();
   });
@@ -315,14 +319,13 @@ describe("discover command", () => {
   });
 
   it("warns about stale cache but continues discovery", async () => {
-    mockGetCacheStatus.mockResolvedValue({
-      state: CACHE_STATE,
-      safeLatestBlock: 30_001n,
-      lagBlocks: 20_001n,
-      paths: {
-        poolsPath: ".data/cache/base/uniswap-v3-pools.jsonl",
-        statePath: ".data/cache/base/uniswap-v3-pools.state.json",
-      },
+    mockDiscover.mockImplementation(async (input) => {
+      input.onResolvedRange?.({
+        latestBlock: "30001",
+        fromBlock: "9000",
+        toBlock: "30001",
+      });
+      return DISCOVERED_SWAP_COUNT;
     });
 
     await expect(runDiscoverCommand({ chain: "base" })).rejects.toThrow(
@@ -336,7 +339,14 @@ describe("discover command", () => {
   });
 
   it("prints quoteVolume output with quote token label", async () => {
-    mockDiscover.mockResolvedValue(DISCOVERED_QUOTE_VOLUME);
+    mockDiscover.mockImplementation(async (input) => {
+      input.onResolvedRange?.({
+        latestBlock: "10000",
+        fromBlock: "9000",
+        toBlock: "10000",
+      });
+      return DISCOVERED_QUOTE_VOLUME;
+    });
 
     await expect(
       runDiscoverCommand({
@@ -353,6 +363,100 @@ describe("discover command", () => {
     );
     expect(output).toContain("QuoteVolume(USDC)");
     expect(output).toContain("123456789.12");
+  });
+
+  it("prints init-cache and scoring progress in human mode", async () => {
+    mockCacheExists.mockResolvedValue(false);
+    mockInitializeCache.mockImplementation(async (input) => {
+      input.onProgress?.({
+        type: "scan_start",
+        chunks: 1,
+        fromBlock: 1_371_680n,
+        toBlock: 1_371_700n,
+      });
+      input.onProgress?.({
+        type: "scan_chunk",
+        index: 1,
+        total: 1,
+        fromBlock: 1_371_680n,
+        toBlock: 1_371_700n,
+      });
+      input.onProgress?.({
+        type: "scan_done",
+        foundPools: 2,
+        scannedToBlock: 1_371_700n,
+      });
+      return {
+        state: CACHE_STATE,
+        rows: CACHE_ROWS,
+        paths: {
+          poolsPath: ".data/cache/base/uniswap-v3-pools.jsonl",
+          statePath: ".data/cache/base/uniswap-v3-pools.state.json",
+        },
+      };
+    });
+    mockDiscover.mockImplementation(async (input) => {
+      input.onResolvedRange?.({
+        latestBlock: "10000",
+        fromBlock: "9000",
+        toBlock: "10000",
+      });
+      input.onProgress?.({
+        type: "score_start",
+        candidateCount: 2,
+        batches: 1,
+        ranges: 1,
+        fromBlock: "9000",
+        toBlock: "10000",
+      });
+      input.onProgress?.({
+        type: "score_batch",
+        batchIndex: 1,
+        batchTotal: 1,
+        addressCount: 2,
+      });
+      input.onProgress?.({
+        type: "score_range",
+        batchIndex: 1,
+        batchTotal: 1,
+        rangeIndex: 1,
+        rangeTotal: 1,
+        fromBlock: "9000",
+        toBlock: "10000",
+      });
+      input.onProgress?.({
+        type: "score_done",
+        candidateCount: 2,
+        scoredPools: 1,
+      });
+      return DISCOVERED_SWAP_COUNT;
+    });
+
+    await expect(
+      runDiscoverCommand({ chain: "base", initCache: true }),
+    ).rejects.toThrow("process.exit(0)");
+
+    const output = stdoutCapture.join("");
+    expect(output).toContain("Initializing missing discovery cache");
+    expect(output).toContain("chunk 1/1 blocks 1371680 - 1371700");
+    expect(output).toContain("Scoring 2 cached pools across 1 batches");
+    expect(output).toContain("range 1/1 blocks 9000 - 10000");
+  });
+
+  it("keeps stdout valid JSON when init-cache is used with --json", async () => {
+    mockCacheExists.mockResolvedValue(false);
+
+    await expect(
+      runDiscoverCommand({ chain: "base", initCache: true, json: true }),
+    ).rejects.toThrow("process.exit(0)");
+
+    expect(() => JSON.parse(stdoutCapture.join(""))).not.toThrow();
+    expect(stdoutCapture.join("")).not.toContain("Scanning PoolCreated logs");
+    expect(mockInitializeCache).toHaveBeenCalledWith({
+      chain: "base",
+      rpcUrl: "https://base-rpc.example",
+      onProgress: undefined,
+    });
   });
 
   it("requires --quote for quoteVolume", async () => {
