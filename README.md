@@ -267,6 +267,8 @@ Initialize the local discovery cache:
 dex-pool discover-cache init --chain base
 ```
 
+`init` is resumable. It appends discovered pool rows and updates cache state after each successful scan chunk, so an interrupted run can be started again and will continue from the last persisted block. If no cache state exists, it starts from the factory deployment block.
+
 Check cache status:
 
 ```bash

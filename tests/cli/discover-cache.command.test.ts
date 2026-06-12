@@ -7,7 +7,6 @@ import {
 import type { UniswapV3PoolCacheState } from "../../src/discovery/discovery.types.js";
 
 vi.mock("../../src/discovery/uniswap-v3-factory-pool-cache.js", () => ({
-  discoveryCacheExists: vi.fn(),
   getDiscoveryCachePaths: vi.fn(),
   getDiscoveryCacheStatus: vi.fn(),
   initializeDiscoveryCache: vi.fn(),
@@ -15,14 +14,12 @@ vi.mock("../../src/discovery/uniswap-v3-factory-pool-cache.js", () => ({
 }));
 
 import {
-  discoveryCacheExists,
   getDiscoveryCachePaths,
   getDiscoveryCacheStatus,
   initializeDiscoveryCache,
   refreshDiscoveryCache,
 } from "../../src/discovery/uniswap-v3-factory-pool-cache.js";
 
-const mockCacheExists = vi.mocked(discoveryCacheExists);
 const mockGetPaths = vi.mocked(getDiscoveryCachePaths);
 const mockGetStatus = vi.mocked(getDiscoveryCacheStatus);
 const mockInitialize = vi.mocked(initializeDiscoveryCache);
@@ -65,7 +62,6 @@ beforeEach(() => {
     },
   );
 
-  mockCacheExists.mockResolvedValue(false);
   mockGetPaths.mockReturnValue({
     poolsPath: ".data/cache/base/uniswap-v3-pools.jsonl",
     statePath: ".data/cache/base/uniswap-v3-pools.state.json",
@@ -118,19 +114,6 @@ describe("discover-cache command", () => {
     );
     expect(stdoutCapture.join("")).toContain("Found pools: 18432");
     expect(exitCode).toBe(0);
-  });
-
-  it("refuses to initialize over an existing cache", async () => {
-    mockCacheExists.mockResolvedValue(true);
-
-    await expect(
-      runDiscoverCacheInitCommand({ chain: "base" }),
-    ).rejects.toThrow("process.exit(1)");
-
-    expect(stderrCapture.join("")).toContain(
-      "DISCOVERY_CACHE_ALREADY_EXISTS:base",
-    );
-    expect(mockInitialize).not.toHaveBeenCalled();
   });
 
   it("refreshes cache and prints pool count", async () => {

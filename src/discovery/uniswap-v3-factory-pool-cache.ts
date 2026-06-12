@@ -102,36 +102,36 @@ export async function initializeDiscoveryCache(input: {
   const latestBlock = await client.getLatestBlockNumber();
   const factoryPreset = getUniswapV3FactoryPreset(input.chain);
   const paths = getDiscoveryCachePaths(input);
-  const rows = await scanPoolCreatedRows({
-    client,
-    factoryAddress: factoryPreset.factoryAddress,
-    fromBlock: factoryPreset.deploymentBlock,
-    toBlock: latestBlock,
-    onProgress: input.onProgress,
-  });
-  const dedupedRows = dedupeRowsByPool(rows);
-  const state = buildState({
+  const current = await loadDiscoveryCacheOrStartFresh({
     chain: input.chain,
+    cacheDir: input.cacheDir,
+  });
+  const startBlock =
+    current.rows.length > 0 || current.state !== undefined
+      ? BigInt(current.state!.scannedToBlock) + 1n
+      : factoryPreset.deploymentBlock;
+  const result = await scanAndPersistPoolCreatedRows({
+    client,
+    chain: input.chain,
+    paths,
     factoryAddress: factoryPreset.factoryAddress,
     deploymentBlock: factoryPreset.deploymentBlock,
-    scannedToBlock: latestBlock,
+    existingRows: current.rows,
+    fromBlock: startBlock,
+    toBlock: latestBlock,
     safeLatestBlock: latestBlock,
-    poolCount: dedupedRows.length,
+    onProgress: input.onProgress,
   });
-
-  await mkdir(dirname(paths.poolsPath), { recursive: true });
-  await writeFile(paths.poolsPath, rowsToJsonl(dedupedRows), "utf8");
-  await writeStateFile(paths.statePath, state);
 
   input.onProgress?.({
     type: "scan_done",
-    foundPools: dedupedRows.length,
-    scannedToBlock: latestBlock,
+    foundPools: result.addedRows,
+    scannedToBlock: BigInt(result.state.scannedToBlock),
   });
 
   return {
-    state,
-    rows: dedupedRows,
+    state: result.state,
+    rows: result.rows,
     paths,
   };
 }
@@ -151,54 +151,28 @@ export async function refreshDiscoveryCache(input: {
     cacheDir: input.cacheDir,
   });
   const startBlock = BigInt(current.state.scannedToBlock) + 1n;
-  const newRows =
-    startBlock <= latestBlock
-      ? await scanPoolCreatedRows({
-          client,
-          factoryAddress: factoryPreset.factoryAddress,
-          fromBlock: startBlock,
-          toBlock: latestBlock,
-          onProgress: input.onProgress,
-        })
-      : [];
-  const existingPools = new Set(
-    current.rows.map((row) => row.pool.toLowerCase()),
-  );
-  const appendRows = newRows.filter((row) => {
-    const key = row.pool.toLowerCase();
-
-    if (existingPools.has(key)) {
-      return false;
-    }
-
-    existingPools.add(key);
-    return true;
-  });
-  const allRows = [...current.rows, ...appendRows];
-  const state = buildState({
+  const result = await scanAndPersistPoolCreatedRows({
+    client,
     chain: input.chain,
+    paths,
     factoryAddress: factoryPreset.factoryAddress,
     deploymentBlock: factoryPreset.deploymentBlock,
-    scannedToBlock: latestBlock,
+    existingRows: current.rows,
+    fromBlock: startBlock,
+    toBlock: latestBlock,
     safeLatestBlock: latestBlock,
-    poolCount: allRows.length,
+    onProgress: input.onProgress,
   });
-
-  if (appendRows.length > 0) {
-    await appendFile(paths.poolsPath, rowsToJsonl(appendRows), "utf8");
-  }
-
-  await writeStateFile(paths.statePath, state);
 
   input.onProgress?.({
     type: "scan_done",
-    foundPools: appendRows.length,
-    scannedToBlock: latestBlock,
+    foundPools: result.addedRows,
+    scannedToBlock: BigInt(result.state.scannedToBlock),
   });
 
   return {
-    state,
-    rows: allRows,
+    state: result.state,
+    rows: result.rows,
     paths,
   };
 }
@@ -284,19 +258,66 @@ export function isDiscoveryCacheMissingError(error: unknown): boolean {
   );
 }
 
-async function scanPoolCreatedRows(input: {
+async function loadDiscoveryCacheOrStartFresh(input: {
+  chain: DexChain;
+  cacheDir?: string;
+}): Promise<{
+  state: UniswapV3PoolCacheState | undefined;
+  rows: UniswapV3PoolCacheRow[];
+}> {
+  try {
+    const cache = await loadDiscoveryCache(input);
+    return {
+      state: cache.state,
+      rows: cache.rows,
+    };
+  } catch (error: unknown) {
+    if (isDiscoveryCacheMissingError(error)) {
+      return {
+        state: undefined,
+        rows: [],
+      };
+    }
+
+    throw error;
+  }
+}
+
+async function scanAndPersistPoolCreatedRows(input: {
   client: EvmJsonRpcClient;
+  chain: DexChain;
+  paths: DiscoveryCachePaths;
   factoryAddress: `0x${string}`;
+  deploymentBlock: bigint;
+  existingRows: UniswapV3PoolCacheRow[];
   fromBlock: bigint;
   toBlock: bigint;
+  safeLatestBlock: bigint;
   onProgress?: (event: DiscoveryCacheProgressEvent) => void;
-}): Promise<UniswapV3PoolCacheRow[]> {
-  const ranges = planBlockRanges(
-    input.fromBlock,
-    input.toBlock,
-    DEFAULT_FACTORY_SCAN_CHUNK_SIZE,
-  );
-  const rows: UniswapV3PoolCacheRow[] = [];
+}): Promise<{
+  state: UniswapV3PoolCacheState;
+  rows: UniswapV3PoolCacheRow[];
+  addedRows: number;
+}> {
+  await mkdir(dirname(input.paths.poolsPath), { recursive: true });
+
+  if (input.existingRows.length === 0) {
+    await writeFile(input.paths.poolsPath, "", { flag: "a" });
+  }
+
+  const ranges =
+    input.fromBlock <= input.toBlock
+      ? planBlockRanges(
+          input.fromBlock,
+          input.toBlock,
+          DEFAULT_FACTORY_SCAN_CHUNK_SIZE,
+        )
+      : [];
+  const rows = [...input.existingRows];
+  const seenPools = new Set(rows.map((row) => row.pool.toLowerCase()));
+  let addedRows = 0;
+  let scannedToBlock =
+    input.fromBlock <= input.toBlock ? input.fromBlock - 1n : input.toBlock;
 
   input.onProgress?.({
     type: "scan_start",
@@ -322,13 +343,63 @@ async function scanPoolCreatedRows(input: {
       toBlock: range.toBlock,
       topics: [UNISWAP_V3_POOL_CREATED_TOPIC],
     });
+    const appendRows: UniswapV3PoolCacheRow[] = [];
 
     for (const log of logs) {
-      rows.push(decodeUniswapV3PoolCreatedLog(log));
+      const row = decodeUniswapV3PoolCreatedLog(log);
+      const key = row.pool.toLowerCase();
+
+      if (seenPools.has(key)) {
+        continue;
+      }
+
+      seenPools.add(key);
+      appendRows.push(row);
     }
+
+    if (appendRows.length > 0) {
+      await appendFile(input.paths.poolsPath, rowsToJsonl(appendRows), "utf8");
+      rows.push(...appendRows);
+      addedRows += appendRows.length;
+    }
+
+    scannedToBlock = range.toBlock;
+    await writeStateFile(
+      input.paths.statePath,
+      buildState({
+        chain: input.chain,
+        factoryAddress: input.factoryAddress,
+        deploymentBlock: input.deploymentBlock,
+        scannedToBlock,
+        safeLatestBlock: input.safeLatestBlock,
+        poolCount: rows.length,
+      }),
+    );
   }
 
-  return rows;
+  const state = buildState({
+    chain: input.chain,
+    factoryAddress: input.factoryAddress,
+    deploymentBlock: input.deploymentBlock,
+    scannedToBlock:
+      ranges.length > 0
+        ? scannedToBlock
+        : input.fromBlock > input.toBlock
+          ? input.toBlock
+          : input.fromBlock,
+    safeLatestBlock: input.safeLatestBlock,
+    poolCount: rows.length,
+  });
+
+  if (ranges.length === 0) {
+    await writeStateFile(input.paths.statePath, state);
+  }
+
+  return {
+    state,
+    rows,
+    addedRows,
+  };
 }
 
 function buildState(input: {

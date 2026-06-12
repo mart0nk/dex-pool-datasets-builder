@@ -1,6 +1,5 @@
 import type { Command } from "commander";
 import {
-  discoveryCacheExists,
   getDiscoveryCacheStatus,
   getDiscoveryCachePaths,
   initializeDiscoveryCache,
@@ -25,10 +24,6 @@ export async function runDiscoverCacheInitCommand(
     const rpcUrl = resolveSimpleRpcUrl({ chain });
     const preset = getUniswapV3FactoryPreset(chain);
     const paths = getDiscoveryCachePaths({ chain });
-
-    if (await discoveryCacheExists({ chain })) {
-      throw new Error(`DISCOVERY_CACHE_ALREADY_EXISTS:${chain}`);
-    }
 
     printLine(`Initializing Uniswap v3 factory pool cache for ${chain}`);
     printLine("");

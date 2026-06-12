@@ -165,6 +165,76 @@ describe("Uniswap v3 factory pool cache", () => {
     ]);
   });
 
+  it("resumes init from the last successfully persisted chunk", async () => {
+    const cacheDir = await makeTempDir();
+    const firstGetLogs = vi
+      .fn()
+      .mockResolvedValueOnce([
+        poolCreatedLog({
+          token0: WETH,
+          token1: USDC,
+          fee: 500,
+          pool: POOL_A,
+          blockNumber: 1_371_680n,
+          logIndex: 0n,
+        }),
+      ])
+      .mockRejectedValueOnce(new Error("RPC_DOWN"));
+    mockCreateClient.mockReturnValue(
+      makeClient({ getLogs: firstGetLogs, latestBlock: 1_391_700n }),
+    );
+
+    await expect(
+      initializeDiscoveryCache({
+        chain: "base",
+        rpcUrl: "https://base-rpc.example",
+        cacheDir,
+      }),
+    ).rejects.toThrow("RPC_DOWN");
+
+    const paths = getDiscoveryCachePaths({ chain: "base", cacheDir });
+    const partialState = JSON.parse(
+      await readFile(paths.statePath, "utf8"),
+    ) as { scannedToBlock: string; poolCount: number };
+    expect(partialState).toMatchObject({
+      scannedToBlock: "1381679",
+      poolCount: 1,
+    });
+
+    const secondGetLogs = vi.fn(async () => [
+      poolCreatedLog({
+        token0: CBBTC,
+        token1: WETH,
+        fee: 3000,
+        pool: POOL_B,
+        blockNumber: 1_381_680n,
+        logIndex: 1n,
+      }),
+    ]);
+    mockCreateClient.mockReturnValue(
+      makeClient({ getLogs: secondGetLogs, latestBlock: 1_391_700n }),
+    );
+
+    const resumed = await initializeDiscoveryCache({
+      chain: "base",
+      rpcUrl: "https://base-rpc.example",
+      cacheDir,
+    });
+
+    expect(secondGetLogs.mock.calls[0]![0]).toMatchObject({
+      fromBlock: 1_381_680n,
+      toBlock: 1_391_679n,
+    });
+    expect(resumed.state).toMatchObject({
+      scannedToBlock: "1391700",
+      poolCount: 2,
+    });
+    expect(resumed.rows.map((row) => row.pool)).toEqual([
+      POOL_A.toLowerCase(),
+      POOL_B.toLowerCase(),
+    ]);
+  });
+
   it("does not update state when refresh scan fails", async () => {
     const cacheDir = await makeTempDir();
     mockCreateClient.mockReturnValue(
