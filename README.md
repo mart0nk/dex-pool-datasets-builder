@@ -89,14 +89,13 @@ BASE_RPC_URL=https://mainnet.base.org
 ETH_RPC_URL=https://your-ethereum-archive-rpc
 ARBITRUM_RPC_URL=https://your-arbitrum-archive-rpc
 POLYGON_RPC_URL=https://your-polygon-archive-rpc
-BSC_RPC_URL=https://your-bsc-archive-rpc
 ```
 
 The CLI automatically loads `.env`.
 
 For historical builds, use an archive-capable RPC. Public RPC endpoints can work for small ranges, but they may be slow or rate-limited.
 
-`BSC_RPC_URL` is available for chain/RPC experiments, but Uniswap v3 discovery currently has factory deployment presets only for `ethereum`, `base`, `arbitrum`, and `polygon`.
+Uniswap v3 discovery currently has factory deployment presets only for `ethereum`, `base`, `arbitrum`, and `polygon`.
 
 ---
 
@@ -867,7 +866,6 @@ Current simple-mode chain presets:
 | Base     |   `8453` | `BASE_RPC_URL`     |
 | Arbitrum |  `42161` | `ARBITRUM_RPC_URL` |
 | Polygon  |    `137` | `POLYGON_RPC_URL`  |
-| BSC      |     `56` | `BSC_RPC_URL`      |
 
 Simple mode currently uses the Uniswap v3-style pool interface. It does not expose a `--dex` flag yet.
 
