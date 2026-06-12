@@ -8,6 +8,7 @@ import { registerInspectCommand } from "./commands/inspect.command.js";
 import { registerDoctorCommand } from "./commands/doctor.command.js";
 import { registerInitCommand } from "./commands/init.command.js";
 import { registerDiscoverCommand } from "./commands/discover.command.js";
+import { registerDiscoverCacheCommand } from "./commands/discover-cache.command.js";
 
 const program = new Command();
 
@@ -18,6 +19,7 @@ program
 
 registerBuildCommand(program);
 registerDiscoverCommand(program);
+registerDiscoverCacheCommand(program);
 registerInspectCommand(program);
 registerDoctorCommand(program);
 registerInitCommand(program);

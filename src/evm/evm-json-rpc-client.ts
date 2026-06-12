@@ -32,7 +32,7 @@ export type EvmBlock = {
 };
 
 export type GetLogsInput = {
-  address: HexString;
+  address: HexString | HexString[];
   fromBlock: bigint;
   toBlock: bigint;
   topics?: HexString[];

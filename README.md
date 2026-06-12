@@ -18,7 +18,8 @@ on-chain Swap logs
 ## Current scope
 
 - simple CLI mode for Uniswap v3-style pools
-- Uniswap v3 top-pool discovery through a configured subgraph
+- RPC-backed Uniswap v3 active-pool discovery
+- explicit local discovery cache for Uniswap v3 `PoolCreated` events
 - pair-based pool resolution via Uniswap v3 factory `getPool`
 - direct pool-address builds
 - token-address + fee pool resolution
@@ -49,7 +50,7 @@ on-chain Swap logs
 - checkpointed/resumable backfills
 - HTTP service orchestration
 - hosted API service
-- automatic liquidity ranking across all pools
+- automatic liquidity/TVL/USD-volume ranking across all pools
 - automatic discovery of all pools for a token pair
 - full production scheduler/orchestrator
 - full independent pool identity verification beyond Uniswap v3-style metadata/factory resolution
@@ -85,18 +86,16 @@ Example `.env`:
 
 ```env
 BASE_RPC_URL=https://mainnet.base.org
-BASE_UNISWAP_V3_SUBGRAPH_URL=https://gateway.thegraph.com/api/YOUR_KEY/subgraphs/id/YOUR_BASE_UNISWAP_V3_SUBGRAPH_ID
 ETH_RPC_URL=https://your-ethereum-archive-rpc
-ETH_UNISWAP_V3_SUBGRAPH_URL=https://gateway.thegraph.com/api/YOUR_KEY/subgraphs/id/YOUR_ETH_UNISWAP_V3_SUBGRAPH_ID
 ARBITRUM_RPC_URL=https://your-arbitrum-archive-rpc
-ARBITRUM_UNISWAP_V3_SUBGRAPH_URL=https://gateway.thegraph.com/api/YOUR_KEY/subgraphs/id/YOUR_ARBITRUM_UNISWAP_V3_SUBGRAPH_ID
 POLYGON_RPC_URL=https://your-polygon-archive-rpc
-BSC_RPC_URL=https://your-bsc-archive-rpc
 ```
 
 The CLI automatically loads `.env`.
 
 For historical builds, use an archive-capable RPC. Public RPC endpoints can work for small ranges, but they may be slow or rate-limited.
+
+Uniswap v3 discovery currently has factory deployment presets only for `ethereum`, `base`, `arbitrum`, and `polygon`.
 
 ---
 
@@ -253,33 +252,96 @@ The older registry/profile/block-range config model is not part of the public CL
 
 ## Discover top pools
 
-Discover the top Uniswap v3 pools from a configured subgraph:
+Discovery is RPC-backed and uses two phases:
+
+1. Cache the Uniswap v3 factory `PoolCreated` universe locally.
+2. Score cached candidate pools from recent `Swap` logs.
+
+This keeps expensive historical factory scans explicit. `dex-pool discover` requires an initialized cache unless `--init-cache` is provided.
+
+Supported Uniswap v3 discovery chains in this MVP are `ethereum`, `base`, `arbitrum`, and `polygon`. Other chains fail explicitly until their factory address and deployment block are verified and added as presets.
+
+Initialize the local discovery cache:
 
 ```bash
-dex-pool discover \
-  --chain base \
-  --top 10 \
-  --by totalValueLockedUSD
+dex-pool discover-cache init --chain base
 ```
 
-Discovery uses `BASE_UNISWAP_V3_SUBGRAPH_URL` by default for Base. You can override it explicitly:
+Check cache status:
 
 ```bash
-dex-pool discover \
-  --chain base \
-  --top 10 \
-  --subgraph-url-env BASE_UNISWAP_V3_SUBGRAPH_URL \
-  --json
+dex-pool discover-cache status --chain base
 ```
 
-Filter by fee tiers or pairs:
+Refresh the cache later:
+
+```bash
+dex-pool discover-cache refresh --chain base
+```
+
+Cache files are local runtime artifacts:
+
+```text
+.data/cache/<chain>/uniswap-v3-pools.jsonl
+.data/cache/<chain>/uniswap-v3-pools.state.json
+```
+
+The state file is versioned and records the chain, factory address, deployment block, scanned block, safe latest block, pool count, and update timestamp. Pool rows include block/log identity, token addresses, fee tier, tick spacing, and canonical pool address.
+
+After cache initialization, discover the most active Uniswap v3 pools from recent RPC logs:
+
+```bash
+dex-pool discover \
+  --chain base \
+  --top 10
+```
+
+Default discovery ranks by swap count over the last 7 days and uses only the chain RPC URL, such as `BASE_RPC_URL`.
+
+For first-run convenience, initialize a missing cache and then score:
 
 ```bash
 dex-pool discover \
   --chain base \
   --top 10 \
-  --include-fees 500,3000 \
-  --exclude-pairs USDC/USDbC
+  --init-cache
+```
+
+`--init-cache` only initializes when the cache is missing. It does not wipe or rebuild an existing cache.
+
+Expected output:
+
+```text
+Loaded discovery cache for base:
+  pools: 18432
+  scannedToBlock: 23890500
+
+Scoring recent Swap logs over last 7 days...
+
+Top active Uniswap v3 pools by swapCount over last 7 days
+
+Rank  Pair        Fee   Swaps  Pool
+1     WETH/USDC   500   15342  0xd0b53d9277642d899df5c87a3966a349a798f224
+```
+
+For quote-token universes, rank pools containing the selected quote token by total quote volume:
+
+```bash
+dex-pool discover \
+  --chain base \
+  --top 10 \
+  --by quoteVolume \
+  --quote USDC \
+  --lookback-days 7
+```
+
+Expected output:
+
+```text
+Top Uniswap v3 pools by quoteVolume(USDC) over last 7 days
+
+Rank  Pair        Fee   QuoteVolume(USDC)  Pool
+1     WETH/USDC   500   123456789.12       0xd0b53d9277642d899df5c87a3966a349a798f224
 ```
 
 Write a simple build config from discovered canonical pool addresses:
@@ -292,6 +354,8 @@ dex-pool discover \
 ```
 
 The generated config uses `pools[]`, not `pairs[]`, because discovery has already resolved canonical pool contracts.
+
+Discovery metadata uses `source: "uniswap_v3_rpc"` and metrics `swapCount | quoteVolume`. Older subgraph source/metric names are intentionally not part of this RPC-only discovery surface.
 
 ---
 
@@ -802,7 +866,6 @@ Current simple-mode chain presets:
 | Base     |   `8453` | `BASE_RPC_URL`     |
 | Arbitrum |  `42161` | `ARBITRUM_RPC_URL` |
 | Polygon  |    `137` | `POLYGON_RPC_URL`  |
-| BSC      |     `56` | `BSC_RPC_URL`      |
 
 Simple mode currently uses the Uniswap v3-style pool interface. It does not expose a `--dex` flag yet.
 
@@ -1178,6 +1241,7 @@ npm run build
 node dist/cli/index.js --help
 node dist/cli/index.js build --help
 node dist/cli/index.js discover --help
+node dist/cli/index.js discover-cache --help
 node dist/cli/index.js inspect --help
 node dist/cli/index.js doctor --help
 
@@ -1237,6 +1301,7 @@ npm run build
 node dist/cli/index.js --help
 node dist/cli/index.js build --help
 node dist/cli/index.js discover --help
+node dist/cli/index.js discover-cache --help
 node dist/cli/index.js inspect --help
 node dist/cli/index.js doctor --help
 npm test

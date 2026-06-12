@@ -33,4 +33,4 @@ export * from "./simple/build-simple-dex-pool-dataset.js";
 export * from "./simple/normalize-simple-pool-selections.js";
 
 export * from "./discovery/discovery.types.js";
-export * from "./discovery/uniswap-v3-subgraph-discovery.js";
+export * from "./discovery/uniswap-v3-rpc-discovery.js";

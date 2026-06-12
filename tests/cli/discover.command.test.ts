@@ -3,32 +3,53 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { runDiscoverCommand } from "../../src/cli/commands/discover.command.js";
-import type { DiscoveredDexPool } from "../../src/discovery/discovery.types.js";
+import type {
+  DiscoveredDexPool,
+  UniswapV3PoolCacheState,
+} from "../../src/discovery/discovery.types.js";
 
-vi.mock(
-  "../../src/discovery/uniswap-v3-subgraph-discovery.js",
-  async (importOriginal) => {
-    const actual =
-      await importOriginal<
-        typeof import("../../src/discovery/uniswap-v3-subgraph-discovery.js")
-      >();
+vi.mock("../../src/discovery/uniswap-v3-rpc-discovery.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<
+      typeof import("../../src/discovery/uniswap-v3-rpc-discovery.js")
+    >();
 
-    return {
-      ...actual,
-      discoverTopUniswapV3Pools: vi.fn(),
-    };
+  return {
+    ...actual,
+    discoverTopUniswapV3Pools: vi.fn(),
+  };
+});
+
+vi.mock("../../src/discovery/uniswap-v3-factory-pool-cache.js", () => ({
+  discoveryCacheExists: vi.fn(),
+  initializeDiscoveryCache: vi.fn(),
+  isDiscoveryCacheMissingError: (error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error);
+    return (
+      message.startsWith("DISCOVERY_CACHE_MISSING:") ||
+      message.startsWith("DISCOVERY_CACHE_STATE_MISSING:")
+    );
   },
-);
+  loadDiscoveryCache: vi.fn(),
+}));
 
-import { discoverTopUniswapV3Pools } from "../../src/discovery/uniswap-v3-subgraph-discovery.js";
+import { discoverTopUniswapV3Pools } from "../../src/discovery/uniswap-v3-rpc-discovery.js";
+import {
+  discoveryCacheExists,
+  initializeDiscoveryCache,
+  loadDiscoveryCache,
+} from "../../src/discovery/uniswap-v3-factory-pool-cache.js";
 
 const mockDiscover = vi.mocked(discoverTopUniswapV3Pools);
+const mockCacheExists = vi.mocked(discoveryCacheExists);
+const mockInitializeCache = vi.mocked(initializeDiscoveryCache);
+const mockLoadCache = vi.mocked(loadDiscoveryCache);
 
-const DISCOVERED: DiscoveredDexPool[] = [
+const DISCOVERED_SWAP_COUNT: DiscoveredDexPool[] = [
   {
     rank: 1,
-    metric: "totalValueLockedUSD",
-    metricValue: "120000000.50",
+    metric: "swapCount",
+    metricValue: "15342",
     pool: {
       id: "base-uniswap-v3-weth-usdc-500-d0b53d92",
       chain: "base",
@@ -48,32 +69,95 @@ const DISCOVERED: DiscoveredDexPool[] = [
       baseToken: "token0",
       quoteToken: "token1",
       feeTier: 500,
-      startBlock: "0",
+      startBlock: "1371680",
     },
     discovery: {
-      source: "uniswap_v3_subgraph",
+      source: "uniswap_v3_rpc",
       snapshotAt: "2026-06-10T00:00:00.000Z",
       rank: 1,
-      metric: "totalValueLockedUSD",
-      metricValue: "120000000.50",
+      metric: "swapCount",
+      metricValue: "15342",
       poolAddress: "0xd0b53d9277642d899df5c87a3966a349a798f224",
       feeTier: 500,
       pair: "WETH/USDC",
+      swapCount: 15342,
+      factoryAddress: "0x33128a8fC17869897dcE68Ed026d694621f6FDfD",
+      factoryDeploymentBlock: "1371680",
+      fromBlock: "9000",
+      toBlock: "10000",
     },
   },
 ];
+
+const DISCOVERED_QUOTE_VOLUME: DiscoveredDexPool[] = [
+  {
+    ...DISCOVERED_SWAP_COUNT[0]!,
+    metric: "quoteVolume",
+    metricValue: "123456789.12",
+    discovery: {
+      ...DISCOVERED_SWAP_COUNT[0]!.discovery,
+      metric: "quoteVolume",
+      metricValue: "123456789.12",
+      quoteSymbol: "USDC",
+      quoteVolume: "123456789.12",
+    },
+  },
+];
+
+const CACHE_STATE: UniswapV3PoolCacheState = {
+  version: 1,
+  chain: "base",
+  factoryAddress: "0x33128a8fC17869897dcE68Ed026d694621f6FDfD",
+  deploymentBlock: "1371680",
+  scannedToBlock: "10000",
+  safeLatestBlock: "10000",
+  poolCount: 2,
+  updatedAt: "2026-06-10T00:00:00.000Z",
+};
+
+const CACHE_ROWS = [
+  {
+    blockNumber: "1371680",
+    blockHash: "0x".padEnd(66, "2") as `0x${string}`,
+    transactionHash: "0x".padEnd(66, "3") as `0x${string}`,
+    logIndex: "0",
+    token0: "0x4200000000000000000000000000000000000006" as `0x${string}`,
+    token1: "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913" as `0x${string}`,
+    fee: 500,
+    tickSpacing: 10,
+    pool: "0xd0b53d9277642d899df5c87a3966a349a798f224" as `0x${string}`,
+  },
+  {
+    blockNumber: "1371681",
+    blockHash: "0x".padEnd(66, "4") as `0x${string}`,
+    transactionHash: "0x".padEnd(66, "5") as `0x${string}`,
+    logIndex: "1",
+    token0: "0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf" as `0x${string}`,
+    token1: "0x4200000000000000000000000000000000000006" as `0x${string}`,
+    fee: 3000,
+    tickSpacing: 60,
+    pool: "0x0000000000000000000000000000000000000001" as `0x${string}`,
+  },
+];
+
+const CACHE_CANDIDATES = CACHE_ROWS.map((row) => ({
+  token0: row.token0,
+  token1: row.token1,
+  feeTier: row.fee,
+  poolAddress: row.pool,
+}));
 
 let stdoutCapture: string[] = [];
 let stderrCapture: string[] = [];
 let exitCode: number | undefined;
 const tempDirs: string[] = [];
-const originalBaseSubgraphUrl = process.env.BASE_UNISWAP_V3_SUBGRAPH_URL;
+const originalBaseRpcUrl = process.env.BASE_RPC_URL;
 
 beforeEach(() => {
   stdoutCapture = [];
   stderrCapture = [];
   exitCode = undefined;
-  process.env.BASE_UNISWAP_V3_SUBGRAPH_URL = "https://subgraph.example/graphql";
+  process.env.BASE_RPC_URL = "https://base-rpc.example";
 
   vi.spyOn(process.stdout, "write").mockImplementation((chunk: unknown) => {
     stdoutCapture.push(String(chunk));
@@ -90,12 +174,37 @@ beforeEach(() => {
     },
   );
 
-  mockDiscover.mockResolvedValue(DISCOVERED);
+  mockDiscover.mockImplementation(async (input) => {
+    input.onResolvedRange?.({
+      latestBlock: "10000",
+      fromBlock: "9000",
+      toBlock: "10000",
+    });
+    return DISCOVERED_SWAP_COUNT;
+  });
+  mockCacheExists.mockResolvedValue(true);
+  mockLoadCache.mockResolvedValue({
+    state: CACHE_STATE,
+    rows: CACHE_ROWS,
+    candidates: CACHE_CANDIDATES,
+    paths: {
+      poolsPath: ".data/cache/base/uniswap-v3-pools.jsonl",
+      statePath: ".data/cache/base/uniswap-v3-pools.state.json",
+    },
+  });
+  mockInitializeCache.mockResolvedValue({
+    state: CACHE_STATE,
+    rows: CACHE_ROWS,
+    paths: {
+      poolsPath: ".data/cache/base/uniswap-v3-pools.jsonl",
+      statePath: ".data/cache/base/uniswap-v3-pools.state.json",
+    },
+  });
 });
 
 afterEach(async () => {
   vi.restoreAllMocks();
-  process.env.BASE_UNISWAP_V3_SUBGRAPH_URL = originalBaseSubgraphUrl;
+  process.env.BASE_RPC_URL = originalBaseRpcUrl;
 
   for (const dir of tempDirs.splice(0)) {
     await rm(dir, { recursive: true, force: true });
@@ -109,15 +218,32 @@ async function makeTempDir(): Promise<string> {
 }
 
 describe("discover command", () => {
-  it("prints human-ranked output", async () => {
-    await expect(
-      runDiscoverCommand({ chain: "base", top: "10" }),
-    ).rejects.toThrow("process.exit(0)");
+  it("defaults to swapCount over a 7 day lookback and prints active wording", async () => {
+    await expect(runDiscoverCommand({ chain: "base", top: "10" })).rejects.toThrow(
+      "process.exit(0)",
+    );
 
     const output = stdoutCapture.join("");
-    expect(output).toContain("Rank");
-    expect(output).toContain("WETH/USDC");
-    expect(output).toContain("120000000.50");
+    expect(output).toContain(
+      "Top active Uniswap v3 pools by swapCount over last 7 days",
+    );
+    expect(output).toContain("Loaded discovery cache for base");
+    expect(output).toContain("pools: 2");
+    expect(output).toContain("Scoring recent Swap logs over last 7 days");
+    expect(output).toContain("Swaps");
+    expect(output).toContain("15342");
+    expect(output).not.toContain("liquidity");
+    expect(output).not.toContain("TVL");
+    expect(mockDiscover).toHaveBeenCalledWith({
+      source: "uniswap_v3_rpc",
+      chain: "base",
+      rpcUrl: "https://base-rpc.example",
+      candidates: CACHE_CANDIDATES,
+      top: { by: "swapCount", limit: 10, lookbackDays: 7 },
+      quote: undefined,
+      onProgress: expect.any(Function),
+      onResolvedRange: expect.any(Function),
+    });
     expect(exitCode).toBe(0);
   });
 
@@ -129,12 +255,217 @@ describe("discover command", () => {
     const parsed = JSON.parse(stdoutCapture.join("")) as {
       chain: string;
       source: string;
+      metric: string;
+      lookbackDays: number;
+      factoryAddress: string;
+      factoryDeploymentBlock: string;
+      cache: { poolCount: number; scannedToBlock: string; lagBlocks?: string };
       pools: DiscoveredDexPool[];
     };
     expect(parsed.chain).toBe("base");
-    expect(parsed.source).toBe("uniswap_v3_subgraph");
+    expect(parsed.source).toBe("uniswap_v3_rpc");
+    expect(parsed.metric).toBe("swapCount");
+    expect(parsed.lookbackDays).toBe(7);
+    expect(parsed.factoryAddress).toBe(CACHE_STATE.factoryAddress);
+    expect(parsed.factoryDeploymentBlock).toBe("1371680");
+    expect(parsed.cache).toEqual({
+      poolCount: 2,
+      scannedToBlock: "10000",
+      lagBlocks: "0",
+    });
     expect(parsed.pools).toHaveLength(1);
-    expect(parsed.pools[0]!.discovery.pair).toBe("WETH/USDC");
+  });
+
+  it("fails explicitly when cache is missing", async () => {
+    mockCacheExists.mockResolvedValue(false);
+    mockLoadCache.mockRejectedValue(new Error("DISCOVERY_CACHE_MISSING:base"));
+
+    await expect(
+      runDiscoverCommand({ chain: "base", top: "10" }),
+    ).rejects.toThrow("process.exit(1)");
+
+    expect(stderrCapture.join("")).toContain("DISCOVERY_CACHE_MISSING:base");
+    expect(stderrCapture.join("")).toContain(
+      "dex-pool discover-cache init --chain base",
+    );
+    expect(mockInitializeCache).not.toHaveBeenCalled();
+    expect(mockDiscover).not.toHaveBeenCalled();
+  });
+
+  it("initializes missing cache with --init-cache before scoring", async () => {
+    mockCacheExists.mockResolvedValue(false);
+
+    await expect(
+      runDiscoverCommand({ chain: "base", initCache: true }),
+    ).rejects.toThrow("process.exit(0)");
+
+    expect(mockInitializeCache).toHaveBeenCalledWith({
+      chain: "base",
+      rpcUrl: "https://base-rpc.example",
+      onProgress: expect.any(Function),
+    });
+    expect(mockDiscover).toHaveBeenCalledOnce();
+  });
+
+  it("does not rebuild an existing cache with --init-cache", async () => {
+    mockCacheExists.mockResolvedValue(true);
+
+    await expect(
+      runDiscoverCommand({ chain: "base", initCache: true }),
+    ).rejects.toThrow("process.exit(0)");
+
+    expect(mockInitializeCache).not.toHaveBeenCalled();
+    expect(mockDiscover).toHaveBeenCalledOnce();
+  });
+
+  it("warns about stale cache but continues discovery", async () => {
+    mockDiscover.mockImplementation(async (input) => {
+      input.onResolvedRange?.({
+        latestBlock: "30001",
+        fromBlock: "9000",
+        toBlock: "30001",
+      });
+      return DISCOVERED_SWAP_COUNT;
+    });
+
+    await expect(runDiscoverCommand({ chain: "base" })).rejects.toThrow(
+      "process.exit(0)",
+    );
+
+    expect(stderrCapture.join("")).toContain(
+      "Discovery cache is 20001 blocks behind latest safe block",
+    );
+    expect(mockDiscover).toHaveBeenCalledOnce();
+  });
+
+  it("prints quoteVolume output with quote token label", async () => {
+    mockDiscover.mockImplementation(async (input) => {
+      input.onResolvedRange?.({
+        latestBlock: "10000",
+        fromBlock: "9000",
+        toBlock: "10000",
+      });
+      return DISCOVERED_QUOTE_VOLUME;
+    });
+
+    await expect(
+      runDiscoverCommand({
+        chain: "base",
+        by: "quoteVolume",
+        quote: "USDC",
+        lookbackDays: "7",
+      }),
+    ).rejects.toThrow("process.exit(0)");
+
+    const output = stdoutCapture.join("");
+    expect(output).toContain(
+      "Top Uniswap v3 pools by quoteVolume(USDC) over last 7 days",
+    );
+    expect(output).toContain("QuoteVolume(USDC)");
+    expect(output).toContain("123456789.12");
+  });
+
+  it("prints init-cache and scoring progress in human mode", async () => {
+    mockCacheExists.mockResolvedValue(false);
+    mockInitializeCache.mockImplementation(async (input) => {
+      input.onProgress?.({
+        type: "scan_start",
+        chunks: 1,
+        fromBlock: 1_371_680n,
+        toBlock: 1_371_700n,
+      });
+      input.onProgress?.({
+        type: "scan_chunk",
+        index: 1,
+        total: 1,
+        fromBlock: 1_371_680n,
+        toBlock: 1_371_700n,
+      });
+      input.onProgress?.({
+        type: "scan_done",
+        foundPools: 2,
+        scannedToBlock: 1_371_700n,
+      });
+      return {
+        state: CACHE_STATE,
+        rows: CACHE_ROWS,
+        paths: {
+          poolsPath: ".data/cache/base/uniswap-v3-pools.jsonl",
+          statePath: ".data/cache/base/uniswap-v3-pools.state.json",
+        },
+      };
+    });
+    mockDiscover.mockImplementation(async (input) => {
+      input.onResolvedRange?.({
+        latestBlock: "10000",
+        fromBlock: "9000",
+        toBlock: "10000",
+      });
+      input.onProgress?.({
+        type: "score_start",
+        candidateCount: 2,
+        batches: 1,
+        ranges: 1,
+        fromBlock: "9000",
+        toBlock: "10000",
+      });
+      input.onProgress?.({
+        type: "score_batch",
+        batchIndex: 1,
+        batchTotal: 1,
+        addressCount: 2,
+      });
+      input.onProgress?.({
+        type: "score_range",
+        batchIndex: 1,
+        batchTotal: 1,
+        rangeIndex: 1,
+        rangeTotal: 1,
+        fromBlock: "9000",
+        toBlock: "10000",
+      });
+      input.onProgress?.({
+        type: "score_done",
+        candidateCount: 2,
+        scoredPools: 1,
+      });
+      return DISCOVERED_SWAP_COUNT;
+    });
+
+    await expect(
+      runDiscoverCommand({ chain: "base", initCache: true }),
+    ).rejects.toThrow("process.exit(0)");
+
+    const output = stdoutCapture.join("");
+    expect(output).toContain("Initializing missing discovery cache");
+    expect(output).toContain("chunk 1/1 blocks 1371680 - 1371700");
+    expect(output).toContain("Scoring 2 cached pools across 1 batches");
+    expect(output).toContain("range 1/1 blocks 9000 - 10000");
+  });
+
+  it("keeps stdout valid JSON when init-cache is used with --json", async () => {
+    mockCacheExists.mockResolvedValue(false);
+
+    await expect(
+      runDiscoverCommand({ chain: "base", initCache: true, json: true }),
+    ).rejects.toThrow("process.exit(0)");
+
+    expect(() => JSON.parse(stdoutCapture.join(""))).not.toThrow();
+    expect(stdoutCapture.join("")).not.toContain("Scanning PoolCreated logs");
+    expect(mockInitializeCache).toHaveBeenCalledWith({
+      chain: "base",
+      rpcUrl: "https://base-rpc.example",
+      onProgress: undefined,
+    });
+  });
+
+  it("requires --quote for quoteVolume", async () => {
+    await expect(
+      runDiscoverCommand({ chain: "base", by: "quoteVolume" }),
+    ).rejects.toThrow("process.exit(1)");
+
+    expect(stderrCapture.join("")).toContain("DISCOVERY_QUOTE_REQUIRED");
+    expect(mockDiscover).not.toHaveBeenCalled();
   });
 
   it("writes a simple config with discovered pools", async () => {
@@ -167,49 +498,5 @@ describe("discover command", () => {
     ).rejects.toThrow("process.exit(1)");
 
     expect(stderrCapture.join("")).toContain("DISCOVERY_CONFIG_EXISTS");
-  });
-
-  it("fails with explicit missing subgraph URL env error", async () => {
-    delete process.env.BASE_UNISWAP_V3_SUBGRAPH_URL;
-
-    await expect(runDiscoverCommand({ chain: "base" })).rejects.toThrow(
-      "process.exit(1)",
-    );
-
-    expect(stderrCapture.join("")).toContain(
-      "DISCOVERY_SUBGRAPH_URL_ENV_MISSING:BASE_UNISWAP_V3_SUBGRAPH_URL",
-    );
-    expect(mockDiscover).not.toHaveBeenCalled();
-  });
-
-  it("passes filter options to discovery adapter", async () => {
-    await expect(
-      runDiscoverCommand({
-        chain: "base",
-        top: "5",
-        by: "volumeUSD",
-        minLiquidityUsd: "1000000",
-        minVolumeUsd: "250000",
-        includeFees: "500,3000",
-        includePairs: "WETH/USDC",
-        excludePairs: "USDC/USDbC",
-        subgraphUrl: "https://direct.example/graphql",
-      }),
-    ).rejects.toThrow("process.exit(0)");
-
-    expect(mockDiscover).toHaveBeenCalledWith({
-      source: "uniswap_v3_subgraph",
-      chain: "base",
-      subgraphUrl: "https://direct.example/graphql",
-      top: {
-        by: "volumeUSD",
-        limit: 5,
-        minLiquidityUsd: 1000000,
-        minVolumeUsd: 250000,
-      },
-      includeFees: [500, 3000],
-      includePairs: ["WETH/USDC"],
-      excludePairs: ["USDC/USDbC"],
-    });
   });
 });

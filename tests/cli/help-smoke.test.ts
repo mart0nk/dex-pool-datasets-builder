@@ -14,6 +14,7 @@ describe("compiled CLI help", () => {
     });
     expect(topLevelHelp).toContain("build");
     expect(topLevelHelp).toContain("discover");
+    expect(topLevelHelp).toContain("discover-cache");
     expect(topLevelHelp).toContain("inspect");
     expect(topLevelHelp).toContain("doctor");
     expect(topLevelHelp).toContain("init");
@@ -24,6 +25,7 @@ describe("compiled CLI help", () => {
       ["--help"],
       ["build", "--help"],
       ["discover", "--help"],
+      ["discover-cache", "--help"],
       ["inspect", "--help"],
       ["doctor", "--help"],
     ]) {

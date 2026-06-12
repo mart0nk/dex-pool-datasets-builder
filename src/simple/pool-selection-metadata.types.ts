@@ -18,9 +18,9 @@ export type DexPoolSelectionMetadata = {
   token0?: HexString;
   token1?: HexString;
 
-  discoverySource?: "uniswap_v3_subgraph";
+  discoverySource?: "uniswap_v3_rpc";
   discoveryRank?: number;
-  discoveryMetric?: "totalValueLockedUSD" | "volumeUSD" | "liquidity";
+  discoveryMetric?: "swapCount" | "quoteVolume";
   discoveryMetricValue?: string;
   discoverySnapshotAt?: string;
 
